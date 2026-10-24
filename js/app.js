@@ -253,7 +253,7 @@
 
   // ---- "Putar": the whole sign-up story as a growing line (slow at first, faster and faster)
   let afterRender = null;
-  const play = { days: [], add: [], cum: [], raf: 0, running: false, u: 0, last: 0, speed: 'normal' };
+  const play = { days: [], add: [], cum: [], raf: 0, running: false, u: 0, last: 0, speed: 'normal', fmt: 'vertical', recording: false };
   const PLAY_MS = { santai: 45000, normal: 28000, cepat: 14000 };
   const PL = { x0: 96, x1: 972, y0: 36, y1: 362 };
   function stopPlay() { cancelAnimationFrame(play.raf); play.running = false; }
@@ -261,13 +261,14 @@
 
   function playCard() {
     const sp = [['santai', 'Santai'], ['normal', 'Normal'], ['cepat', 'Cepat']].map(([v, t]) => `<button data-act="pl-speed" data-v="${v}" class="${play.speed === v ? 'on' : ''}">${t}</button>`).join('');
+    const fm = [['vertical', 'Vertikal'], ['wide', 'Lebar']].map(([v, t]) => `<button data-act="pl-fmt" data-v="${v}" class="${play.fmt === v ? 'on' : ''}">${t}</button>`).join('');
     return `<div class="card" style="margin-bottom:14px"><h3>Perjalanan pendaftar</h3>
       <p class="hint">Dari pendaftar pertama sampai hari ini. Garis total pendaftar tumbuh hari demi hari: pelan di awal, makin cepat.</p>
       <div class="play-head"><div><div class="pl-date" id="pl-date">—</div><div class="hint" id="pl-day"></div></div>
         <div class="pl-box"><div class="pl-total" id="pl-total">0</div><div class="hint">total pendaftar</div></div>
         <div class="pl-box"><div class="pl-add" id="pl-add">+0</div><div class="hint">hari ini</div></div></div>
       <svg id="pl-svg" class="plsvg" viewBox="0 0 1000 420" role="img" aria-label="Pertumbuhan total pendaftar"></svg>
-      <div class="ctl" style="margin:10px 0 8px">${ctl('Putar', seg('<button class="on" id="pl-btn" data-act="pl-toggle">▶ Putar</button><button data-act="pl-replay">↺ Ulang</button>'))}${ctl('Kecepatan', seg(sp))}</div>
+      <div class="ctl" style="margin:10px 0 8px">${ctl('Putar', seg('<button class="on" id="pl-btn" data-act="pl-toggle">▶ Putar</button><button data-act="pl-replay">↺ Ulang</button>'))}${ctl('Kecepatan', seg(sp))}${ctl('Video', seg(fm) + '<button class="btn sm" id="pl-save" data-act="pl-save" style="margin-left:6px;white-space:nowrap">⬇ Simpan video</button>')}</div><div class="hint" id="pl-rec" style="min-height:16px;margin:-2px 0 6px"></div>
       <input type="range" id="pl-slider" min="0" max="0" step="0.01" value="0" style="width:100%" aria-label="Geser hari"></div>`;
   }
   function renderPlay(f) {
@@ -328,6 +329,119 @@
     play.running = true; play.last = performance.now(); setPlayBtn();
     play.raf = requestAnimationFrame(playFrame);
   }
+
+  // ---- save the same animation as a video (drawn on a canvas and recorded in the browser)
+  function drawPlayCanvas(ctx, W, H, f) {
+    const N = play.days.length;
+    f = Math.max(0, Math.min(N - 1, f));
+    const i = Math.floor(f), fr = f - i, j = Math.min(i + 1, N - 1);
+    const total = play.cum[i] + (play.cum[j] - play.cum[i]) * fr;
+    const tall = H > W;
+    const U = tall ? W : H * 1.25; // one unit that sizes the text in both layouts
+    const pad = Math.round(U * 0.07);
+    const FONT = '"Plus Jakarta Sans", system-ui, sans-serif';
+    const font = (w, k) => `${w} ${Math.round(U * k)}px ${FONT}`;
+    ctx.fillStyle = '#F4F7F2'; ctx.fillRect(0, 0, W, H);
+    ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+    ctx.fillStyle = '#538248'; ctx.font = font(800, 0.034);
+    ctx.fillText('Artosku · Pendaftar', pad, pad + U * 0.03);
+    const d = play.days[i];
+    const dateTxt = new Date(d + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    ctx.fillStyle = '#1b2a1a'; ctx.font = font(800, tall ? 0.056 : 0.037);
+    ctx.fillText(dateTxt, pad, pad + U * (tall ? 0.15 : 0.13));
+    ctx.fillStyle = '#6b7a69'; ctx.font = font(600, 0.026);
+    ctx.fillText(`Hari ke-${i + 1} dari ${N}`, pad, pad + U * (tall ? 0.2 : 0.18));
+    const bigY = pad + U * (tall ? 0.38 : 0.37);
+    ctx.fillStyle = '#1b2a1a'; ctx.font = font(800, tall ? 0.19 : 0.15);
+    const totTxt = num(Math.round(total));
+    ctx.fillText(totTxt, pad, bigY);
+    ctx.fillStyle = '#538248'; ctx.font = font(800, tall ? 0.07 : 0.05);
+    if (tall) {
+      const tw = (ctx.font = font(800, 0.19), ctx.measureText(totTxt).width);
+      ctx.font = font(800, 0.07);
+      ctx.fillText('+' + num(play.add[i]) + ' hari ini', pad + tw + U * 0.03, bigY);
+    } else {
+      ctx.fillText('+' + num(play.add[i]) + ' hari ini', pad, bigY + U * 0.085);
+    }
+    ctx.fillStyle = '#6b7a69'; ctx.font = font(600, 0.026);
+    ctx.fillText('total pendaftar', pad, bigY + U * (tall ? 0.045 : (0.085 + 0.045)));
+    // the chart: under the numbers on a tall video, to the right of them on a wide one
+    const cx0 = tall ? pad + U * 0.075 : W * 0.5, cx1 = W - pad;
+    const cy0 = tall ? bigY + U * 0.1 : pad + U * 0.05, cy1 = H - pad - U * 0.05;
+    const ymax = niceMax(Math.max(4, total * 1.08));
+    const X = (k) => cx0 + (cx1 - cx0) * (N === 1 ? 0 : k / (N - 1));
+    const Y = (v) => cy1 - (cy1 - cy0) * (v / ymax);
+    ctx.font = font(600, 0.022); ctx.textAlign = 'right';
+    for (const q of [0, 0.25, 0.5, 0.75, 1]) {
+      const y = Y(ymax * q);
+      ctx.strokeStyle = '#dfe6dc'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx0, y); ctx.lineTo(cx1, y); ctx.stroke();
+      ctx.fillStyle = '#6b7a69'; ctx.fillText(num(Math.round(ymax * q)), cx0 - U * 0.012, y + U * 0.008);
+    }
+    const hx = X(f), hy = Y(total);
+    ctx.beginPath(); ctx.moveTo(X(0), cy1);
+    for (let k = 0; k <= i; k++) ctx.lineTo(X(k), Y(play.cum[k]));
+    ctx.lineTo(hx, hy); ctx.lineTo(hx, cy1); ctx.closePath();
+    ctx.fillStyle = 'rgba(83,130,72,0.14)'; ctx.fill();
+    ctx.beginPath(); ctx.moveTo(X(0), Y(play.cum[0]));
+    for (let k = 1; k <= i; k++) ctx.lineTo(X(k), Y(play.cum[k]));
+    ctx.lineTo(hx, hy);
+    ctx.strokeStyle = '#538248'; ctx.lineWidth = Math.max(5, U * 0.006); ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.stroke();
+    ctx.beginPath(); ctx.arc(hx, hy, U * 0.011, 0, Math.PI * 2); ctx.fillStyle = '#538248'; ctx.fill();
+    ctx.lineWidth = 4; ctx.strokeStyle = '#F4F7F2'; ctx.stroke();
+    const fmtD = (x) => new Date(x + 'T00:00:00').toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
+    ctx.fillStyle = '#6b7a69'; ctx.font = font(600, 0.022);
+    ctx.textAlign = 'left'; ctx.fillText(fmtD(play.days[0]), cx0, cy1 + U * 0.04);
+    ctx.textAlign = 'right'; ctx.fillText(fmtD(play.days[N - 1]), cx1, cy1 + U * 0.04);
+  }
+
+  async function playSaveVideo() {
+    if (play.recording) return;
+    if (!play.days.length) return;
+    if (!window.MediaRecorder || !HTMLCanvasElement.prototype.captureStream) return fail('Browser ini belum bisa merekam video. Coba Chrome atau Safari terbaru.');
+    const mime = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'].find((m) => MediaRecorder.isTypeSupported(m));
+    if (!mime) return fail('Browser ini tidak punya format video yang didukung.');
+    const W = play.fmt === 'wide' ? 1280 : 1080, H = play.fmt === 'wide' ? 720 : 1350;
+    const canvas = document.createElement('canvas');
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    stopPlay(); setPlayBtn();
+    const btn = $('#pl-save'), note = $('#pl-rec');
+    play.recording = true; if (btn) btn.disabled = true;
+    try {
+      try { await document.fonts.load('800 40px "Plus Jakarta Sans"'); await document.fonts.load('600 20px "Plus Jakarta Sans"'); } catch (e) { /* the system font is used */ }
+      const stream = canvas.captureStream(30);
+      const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 6000000 });
+      const chunks = [];
+      rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+      const done = new Promise((res) => { rec.onstop = res; });
+      const N = play.days.length, total = PLAY_MS[play.speed], hold = 2200;
+      drawPlayCanvas(ctx, W, H, 0);
+      rec.start();
+      const t0 = performance.now();
+      await new Promise((resolve) => {
+        const tick = (now) => {
+          const el = now - t0;
+          const u = Math.min(1, el / total);
+          drawPlayCanvas(ctx, W, H, (N - 1) * u * u);
+          if (note) note.textContent = `Merekam video… ${Math.round(Math.min(1, el / (total + hold)) * 100)}%. Biarkan tab ini terbuka.`;
+          if (el >= total + hold) return resolve();
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      });
+      rec.stop();
+      await done;
+      const ext = mime.startsWith('video/mp4') ? 'mp4' : 'webm';
+      const blob = new Blob(chunks, { type: mime.split(';')[0] });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = `pendaftar-artosku-${play.fmt}.${ext}`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 8000);
+      if (note) note.textContent = `Video tersimpan (${ext.toUpperCase()}, ${Math.round(blob.size / 1024 / 1024 * 10) / 10} MB).`;
+      toast('Video tersimpan.');
+    } catch (e) { fail(e); if (note) note.textContent = ''; } finally { play.recording = false; if (btn) btn.disabled = false; }
+  }
+
   function playReplay() { stopPlay(); play.u = 0; renderPlay(0); playToggle(); }
 
   const SG_KEY = 'admin-signup-prefs';
@@ -845,7 +959,7 @@
       tier: () => tierModal(el.dataset.email, el.dataset.type), 'tier-save': () => tierSave(el.dataset.email),
       'cost-days': () => { cost.days = +el.dataset.v; route(); }, 'cost-own': () => { cost.hideOwn = !cost.hideOwn; route(); },
       'quota-one': quotaOne, 'quota-all': quotaAllModal, 'quota-all-do': quotaAllDo,
-      'ai-tab': () => { aip.tab = el.dataset.v; sgSave(); route(); }, 'ai-metric': () => { aip.metric = el.dataset.v; sgSave(); route(); }, 'ai-usearch': () => { aip.uq = ($('#aiq').value || '').trim(); sgSave(); route(); }, 'ai-pick': () => { aip.account = el.dataset.email; aip.tab = 'user'; aip.uq = ''; sgSave(); route(); }, 'ai-clear': () => { aip.account = ''; sgSave(); route(); }, 'ai-tier': () => { aip.list.tier = el.dataset.v; aip.list.page = 0; sgSave(); route(); }, 'ai-lrange': () => { aip.list.range = el.dataset.v; aip.list.page = 0; sgSave(); route(); }, 'ai-lsearch': () => { aip.list.q = ($('#aiq').value || '').trim(); aip.list.page = 0; sgSave(); route(); }, 'ai-page': () => { aip.list.page = Math.max(0, aip.list.page + Number(el.dataset.d)); sgSave(); route(); }, 'ai-csv': aiCsv, 'pl-toggle': playToggle, 'pl-replay': playReplay, 'pl-speed': () => { play.speed = el.dataset.v; $$('[data-act=pl-speed]').forEach((b) => b.classList.toggle('on', b.dataset.v === play.speed)); },'rel-save': relSave, 'ledger-add': () => ledgerAdd(el.dataset.kind), 'ledger-del': () => ledgerDel(el.dataset.id), 'sg-type': () => { prefOf(el.dataset.c).type = el.dataset.v; sgSave(); route(); }, 'sg-range': () => { prefOf(el.dataset.c).range = el.dataset.v; sgSave(); route(); }, 'sg-metric': () => { prefOf(el.dataset.c).metric = el.dataset.v; sgSave(); route(); }, 'set-save': () => setSave(el.dataset.key), 'sum-days': () => { sumDays = +el.dataset.v; route(); }, flag: () => flagToggle(el), 'param-save': () => paramSave(el.dataset.key),
+      'ai-tab': () => { aip.tab = el.dataset.v; sgSave(); route(); }, 'ai-metric': () => { aip.metric = el.dataset.v; sgSave(); route(); }, 'ai-usearch': () => { aip.uq = ($('#aiq').value || '').trim(); sgSave(); route(); }, 'ai-pick': () => { aip.account = el.dataset.email; aip.tab = 'user'; aip.uq = ''; sgSave(); route(); }, 'ai-clear': () => { aip.account = ''; sgSave(); route(); }, 'ai-tier': () => { aip.list.tier = el.dataset.v; aip.list.page = 0; sgSave(); route(); }, 'ai-lrange': () => { aip.list.range = el.dataset.v; aip.list.page = 0; sgSave(); route(); }, 'ai-lsearch': () => { aip.list.q = ($('#aiq').value || '').trim(); aip.list.page = 0; sgSave(); route(); }, 'ai-page': () => { aip.list.page = Math.max(0, aip.list.page + Number(el.dataset.d)); sgSave(); route(); }, 'ai-csv': aiCsv, 'pl-toggle': playToggle, 'pl-save': playSaveVideo, 'pl-fmt': () => { play.fmt = el.dataset.v; $$('[data-act=pl-fmt]').forEach((b) => b.classList.toggle('on', b.dataset.v === play.fmt)); }, 'pl-replay': playReplay, 'pl-speed': () => { play.speed = el.dataset.v; $$('[data-act=pl-speed]').forEach((b) => b.classList.toggle('on', b.dataset.v === play.speed)); },'rel-save': relSave, 'ledger-add': () => ledgerAdd(el.dataset.kind), 'ledger-del': () => ledgerDel(el.dataset.id), 'sg-type': () => { prefOf(el.dataset.c).type = el.dataset.v; sgSave(); route(); }, 'sg-range': () => { prefOf(el.dataset.c).range = el.dataset.v; sgSave(); route(); }, 'sg-metric': () => { prefOf(el.dataset.c).metric = el.dataset.v; sgSave(); route(); }, 'set-save': () => setSave(el.dataset.key), 'sum-days': () => { sumDays = +el.dataset.v; route(); }, flag: () => flagToggle(el), 'param-save': () => paramSave(el.dataset.key),
     }[act];
     if (go) go();
   });
