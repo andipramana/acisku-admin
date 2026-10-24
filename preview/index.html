@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Artosku Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#EEF2EC;--card:#fff;--ink:#1b2a1a;--muted:#6b7a69;--line:#e3e9e0;--green:#538248;--greenbg:#E6F0E2;--red:#D9534F;--redbg:#FDECEB;--amber:#B9800A;--amberbg:#FDF3DC;--blue:#2E6BE6;--bluebg:#E8F0FD;--bar:#9DBB93;--barnow:#538248}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#141a13;--card:#1d251c;--ink:#e8eee6;--muted:#9aa896;--line:#2c382a;--greenbg:#26361f;--redbg:#3a2220;--amberbg:#3a3015;--bluebg:#1c2a45;--bar:#3f5a38;--barnow:#7fb06f;--green:#7fb06f}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Plus Jakarta Sans",system-ui,sans-serif;font-size:14px}
+button,input,select,textarea{font:inherit;color:inherit}
+.app{display:grid;grid-template-columns:230px 1fr;min-height:100vh}
+.side{background:var(--card);border-right:1px solid var(--line);padding:18px 12px;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:4px}
+.brand{font-weight:800;font-size:17px;padding:4px 10px 14px}
+.brand small{display:block;font-size:11px;color:var(--muted);font-weight:600}
+.nav a{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;color:var(--ink);text-decoration:none;font-weight:600}
+.nav a.on{background:var(--greenbg);color:var(--green)}
+.nav a span.i{width:20px;text-align:center}
+.me{margin-top:auto;font-size:12px;color:var(--muted);padding:10px;border-top:1px solid var(--line)}
+.main{padding:22px 26px 60px;max-width:1100px;width:100%}
+h1{font-size:22px;margin:0 0 4px}
+.sub{color:var(--muted);margin:0 0 18px}
+.grid{display:grid;gap:14px}
+.grid>*,.app>div,.main{min-width:0}
+td .btn+.btn{margin-left:4px}
+td.n{white-space:nowrap}
+.g4{grid-template-columns:repeat(4,1fr)}.g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:repeat(3,1fr)}
+.card{background:var(--card);border-radius:18px;padding:16px;box-shadow:0 1px 6px rgba(0,0,0,.05)}
+.card h3{margin:0 0 4px;font-size:14px}
+.card .hint{color:var(--muted);font-size:12px;margin:0 0 12px}
+.kpi .v{font-size:26px;font-weight:800;line-height:1.1}
+.kpi .l{color:var(--muted);font-size:12px;margin-top:4px}
+.kpi .d{font-size:12px;font-weight:700;margin-top:6px}
+.up{color:var(--green)}.down{color:var(--red)}
+a{color:var(--green);font-weight:700;text-decoration:none}
+.chip{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:800}
+.chip.red{background:var(--redbg);color:var(--red)}.chip.gr{background:var(--greenbg);color:var(--green)}.chip.am{background:var(--amberbg);color:var(--amber)}.chip.bl{background:var(--bluebg);color:var(--blue)}.chip.mu{background:var(--line);color:var(--muted)}
+.bars{display:flex;align-items:flex-end;gap:6px;height:130px;padding-top:8px}
+.bars div{flex:1;background:var(--bar);border-radius:6px 6px 2px 2px;position:relative;min-width:8px}
+.bars div.now{background:var(--barnow)}
+.bars div b{position:absolute;top:-16px;left:50%;transform:translateX(-50%);font-size:10px;font-weight:700;color:var(--muted);white-space:nowrap}
+.axis{display:flex;gap:6px;margin-top:4px;color:var(--muted);font-size:10px}
+.axis span{flex:1;text-align:center}
+table{width:100%;border-collapse:collapse}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.3px;color:var(--muted);text-align:left;padding:8px 8px;border-bottom:1px solid var(--line)}
+td{padding:10px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+tr:last-child td{border:0}
+.tablewrap{overflow-x:auto}
+.btn{border:0;border-radius:12px;padding:10px 16px;font-weight:700;background:var(--green);color:#fff;cursor:pointer}
+.btn.sec{background:var(--greenbg);color:var(--green)}.btn.dng{background:var(--red)}.btn.sm{padding:6px 12px;font-size:12px}
+.field{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
+.field label{font-size:12px;font-weight:700;color:var(--muted)}
+input,select,textarea{border:1px solid var(--line);background:var(--card);border-radius:12px;padding:10px 12px}
+textarea{min-height:76px;resize:vertical}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.checks{display:flex;flex-wrap:wrap;gap:8px 18px;margin-bottom:12px}
+.checks label{display:flex;align-items:center;gap:6px;font-weight:600}
+.switch{width:42px;height:24px;border-radius:999px;background:var(--line);position:relative;display:inline-block;vertical-align:middle;cursor:pointer}
+.switch:after{content:"";position:absolute;left:3px;top:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.15s}
+.switch.on{background:var(--green)}.switch.on:after{left:21px}
+.warn{background:var(--amberbg);color:var(--amber);border-radius:12px;padding:10px 12px;font-size:12px;font-weight:600;margin-bottom:12px}
+.demo{position:fixed;right:14px;bottom:12px;background:var(--ink);color:var(--bg);border-radius:999px;padding:6px 12px;font-size:11px;font-weight:700;z-index:9;opacity:.85}
+.sec{display:none}.sec.on{display:block}
+.login{display:none;position:fixed;inset:0;background:var(--bg);z-index:20;align-items:center;justify-content:center;padding:20px}
+.login.on{display:flex}
+.login .box{background:var(--card);border-radius:24px;padding:28px;max-width:360px;width:100%;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.1)}
+.login h2{margin:8px 0 6px}.login p{color:var(--muted);margin:0 0 18px;line-height:1.5}
+.gbtn{display:block;width:100%;border:1px solid var(--line);background:var(--card);border-radius:14px;padding:12px;font-weight:700;cursor:pointer}
+.tl{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.tl button{border:1px solid var(--line);background:var(--card);border-radius:999px;padding:6px 12px;font-weight:700;font-size:12px;cursor:pointer}
+.tl button.on{background:var(--green);color:#fff;border-color:var(--green)}
+.mono{font-family:ui-monospace,Consolas,monospace;font-size:12px}
+.modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:30;align-items:center;justify-content:center;padding:20px}
+.modal.on{display:flex}.modal .box{background:var(--card);border-radius:20px;padding:20px;max-width:380px;width:100%}
+.mtop{display:none}
+@media(max-width:900px){
+  .app{grid-template-columns:1fr}
+  .side{display:none}
+  .mtop{display:block;position:sticky;top:0;background:var(--card);z-index:8;border-bottom:1px solid var(--line);padding:10px 12px}
+  .mtop .t{font-weight:800;margin-bottom:8px}
+  .mtop .nav{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px}
+  .mtop .nav a{white-space:nowrap;padding:7px 12px;background:var(--bg);flex:none}
+  .main{padding:16px 14px 70px}
+  .g4{grid-template-columns:1fr 1fr}.g3,.g2,.row2{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<div class="login on" id="login"><div class="box">
+  <div style="font-size:34px">🐔</div><h2>Artosku Admin</h2>
+  <p>Khusus pengelola Artosku. Masuk dengan akun Google yang terdaftar sebagai admin.</p>
+  <button class="gbtn" onclick="document.getElementById('login').classList.remove('on')">Masuk dengan Google</button>
+  <p style="font-size:12px;margin:14px 0 0">Akun lain yang mencoba masuk akan ditolak oleh server, bukan hanya disembunyikan di halaman ini.</p>
+</div></div>
+
+<div class="modal" id="confirm"><div class="box">
+  <h3 style="margin:0 0 6px">Reset kuota AI semua user?</h3>
+  <p style="color:var(--muted);margin:0 0 12px;line-height:1.5">Ini mengubah pemakaian harian SEMUA akun dan semua perangkat jadi 0. Tidak bisa dibatalkan. Ketik <b>RESET</b> untuk lanjut.</p>
+  <input style="width:100%;margin-bottom:12px" placeholder="RESET">
+  <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn sec" onclick="confirm_.classList.remove('on')">Batal</button><button class="btn dng" onclick="confirm_.classList.remove('on')">Reset</button></div>
+</div></div>
+
+<div class="app">
+  <aside class="side">
+    <div class="brand">Artosku Admin<small>klafrhlcxyyxdbrdenwk</small></div>
+    <nav class="nav" id="nav1"></nav>
+    <div class="me">dev.andipramana@gmail.com<br>admin</div>
+  </aside>
+  <div>
+    <div class="mtop"><div class="t">Artosku Admin</div><nav class="nav" id="nav2"></nav></div>
+    <main class="main">
+
+<section class="sec on" id="s-ringkasan">
+  <h1>Ringkasan</h1><p class="sub">Angka utama hari ini. Sumber: query “Count Registered User”, “Check New User”, “Lihat Cost”.</p>
+  <div class="grid g4" style="margin-bottom:14px">
+    <div class="card kpi"><div class="v">248</div><div class="l">Pendaftar total</div><div class="d up">+6 hari ini</div></div>
+    <div class="card kpi"><div class="v">3</div><div class="l">Pro / Max aktif</div><div class="d">2 Pro · 1 Max</div></div>
+    <div class="card kpi"><div class="v">Rp1.840</div><div class="l">Biaya AI hari ini</div><div class="d up">−32% dari kemarin</div></div>
+    <div class="card kpi"><div class="v">41</div><div class="l">Panggilan AI hari ini</div><div class="d">cache 86%</div></div>
+  </div>
+  <div class="grid g2">
+    <div class="card"><h3>Pendaftar per hari</h3><p class="hint">14 hari terakhir (WIB)</p><div class="bars" id="bars1"></div><div class="axis" id="axis1"></div></div>
+    <div class="card"><h3>Biaya AI per hari</h3><p class="hint">Rp, tanpa akun uji</p><div class="bars" id="bars2"></div><div class="axis" id="axis2"></div></div>
+  </div>
+  <div class="card" style="margin-top:14px"><h3>Yang sedang aktif</h3><p class="hint">Sekali lihat</p>
+    <div class="tablewrap"><table><tr><td>Pengumuman berlangsung</td><td><span class="chip red">1 gangguan</span></td><td class="n"><a href="#pengumuman">Buka</a></td></tr>
+    <tr><td>Versi terbaru / minimum</td><td><span class="chip gr">1.7.8 / 1.7.6</span></td><td class="n"><a href="#rilis">Buka</a></td></tr>
+    <tr><td>Fitur uji menyala</td><td><span class="chip am">streak_maskot</span></td><td class="n"><a href="#rilis">Buka</a></td></tr></table></div></div>
+</section>
+
+<section class="sec" id="s-pengumuman">
+  <h1>Pengumuman</h1><p class="sub">Buat pengumuman, tandai selesai, dan kirim push. Yang tampil ke user: modal, daftar Pengumuman, strip di layar fitur.</p>
+  <div class="grid g2">
+    <div class="card"><h3>Buat pengumuman</h3><p class="hint">Teks Indonesia wajib, Inggris diisi juga.</p>
+      <div class="tl"><button class="on">Gangguan</button><button>Info</button><button>Pembaruan</button></div>
+      <div class="field"><label>Judul (Indonesia)</label><input value="Fitur AI lagi gangguan"></div>
+      <div class="field"><label>Isi (Indonesia)</label><textarea>Catat pakai AI dan Scan struk sementara belum bisa dipakai. Catat manual tetap jalan seperti biasa.</textarea></div>
+      <div class="field"><label>Judul (English)</label><input value="AI features are having problems"></div>
+      <div class="field"><label>Isi (English)</label><textarea>AI logging and receipt scan are temporarily unavailable. Manual logging still works as usual.</textarea></div>
+      <div class="field"><label>Fitur terdampak (muncul strip di layarnya)</label><div class="checks"><label><input type="checkbox" checked>AI</label><label><input type="checkbox">Scan</label><label><input type="checkbox">Sinkron</label><label><input type="checkbox">Backup</label><label><input type="checkbox">Langganan</label></div></div>
+      <div class="row2"><div class="field"><label>Untuk</label><select><option>Semua user</option><option>Free</option><option>Pro</option><option>Max</option><option>Berbayar (Pro+Max)</option></select></div>
+      <div class="field"><label>Versi app (opsional)</label><input placeholder="mis. 1.7.0 – 1.8.0"></div></div>
+      <div class="checks"><label><input type="checkbox" checked>Tampilkan modal</label><label><input type="checkbox">Kirim push (hanya untuk “Semua user”)</label></div>
+      <button class="btn">Terbitkan</button></div>
+    <div class="card"><h3>Daftar pengumuman</h3><p class="hint">Terbaru di atas</p>
+      <div class="tablewrap"><table><tr><th>Judul</th><th>Status</th><th></th></tr>
+      <tr><td><b>Fitur AI lagi gangguan</b><br><span class="hint">24 Okt 14.20 · modal · AI</span></td><td><span class="chip red">Berlangsung</span></td><td class="n"><button class="btn sm sec">Kabar</button> <button class="btn sm">Selesai</button></td></tr>
+      <tr><td><b>Pemeliharaan server Minggu malam</b><br><span class="hint">24 Okt 09.00 · info</span></td><td><span class="chip bl">Info</span></td><td class="n"><button class="btn sm sec">Ubah</button></td></tr>
+      <tr><td><b>Artosku 1.8.0 sudah ada</b><br><span class="hint">23 Okt · pembaruan</span></td><td><span class="chip gr">Pembaruan</span></td><td class="n"><button class="btn sm sec">Ubah</button></td></tr>
+      <tr><td><b>Sinkron Wallet Bersama lambat</b><br><span class="hint">20 Okt · gangguan</span></td><td><span class="chip mu">Selesai</span></td><td class="n"></td></tr></table></div></div>
+  </div>
+</section>
+
+<section class="sec" id="s-pengguna">
+  <h1>Pengguna</h1><p class="sub">Cari akun dan ubah paketnya. Email ditampilkan sebagian di daftar.</p>
+  <div class="grid g2">
+    <div class="card"><h3>Cari akun</h3><div class="field"><input placeholder="email atau sebagian email"></div>
+      <div class="tablewrap"><table><tr><th>Akun</th><th>Paket</th><th>Sumber</th><th></th></tr>
+      <tr><td>an••••@gmail.com</td><td><span class="chip gr">Pro</span></td><td>gift</td><td class="n"><button class="btn sm sec">Ubah</button></td></tr>
+      <tr><td>mi••••@gmail.com</td><td><span class="chip bl">Max</span></td><td>Play</td><td class="n"><button class="btn sm sec">Ubah</button></td></tr>
+      <tr><td>da••••@gmail.com</td><td><span class="chip mu">Free</span></td><td>—</td><td class="n"><button class="btn sm sec">Ubah</button></td></tr></table></div></div>
+    <div class="card"><h3>Ubah paket (hadiah)</h3><p class="hint">Mengubah <span class="mono">subscription_type</span>, sumber “gift”. Paket dari Google Play tidak ditimpa.</p>
+      <div class="field"><label>Akun</label><input value="andipramana07@gmail.com"></div>
+      <div class="field"><label>Paket</label><select><option>Free</option><option selected>Pro</option><option>Max</option></select></div>
+      <div class="field"><label>Berakhir (opsional)</label><input type="date"></div>
+      <button class="btn">Simpan</button></div>
+  </div>
+</section>
+
+<section class="sec" id="s-biaya">
+  <h1>Biaya AI</h1><p class="sub">Dari tabel panggilan AI. Akun uji (demo, test, cache, synth…) tidak ikut dihitung. Kurs Rp17.900/USD.</p>
+  <div class="tl"><button>Hari ini</button><button class="on">7 hari</button><button>30 hari</button><button>Semua</button><span style="flex:1"></span><select><option>Semua fitur</option><option>ai-chat</option><option>scan</option><option>quick-add</option></select></div>
+  <div class="grid g2">
+    <div class="card"><h3>Per hari</h3><p class="hint">Query “Lihat Cost”</p><div class="tablewrap"><table><tr><th>Tanggal</th><th class="n">Permintaan</th><th class="n">USD</th><th class="n">Rupiah</th></tr>
+      <tr><td>24 Okt</td><td class="n">41</td><td class="n">0,103</td><td class="n">1.840</td></tr><tr><td>23 Okt</td><td class="n">57</td><td class="n">0,152</td><td class="n">2.720</td></tr><tr><td>22 Okt</td><td class="n">49</td><td class="n">0,127</td><td class="n">2.270</td></tr><tr><td>21 Okt</td><td class="n">38</td><td class="n">0,094</td><td class="n">1.680</td></tr></table></div></div>
+    <div class="card"><h3>Per akun</h3><p class="hint">Query “Call Per User” dan “Cost Per User” (ai-chat)</p><div class="tablewrap"><table><tr><th>Akun</th><th class="n">Panggilan</th><th class="n">Rata-rata USD</th><th class="n">Rupiah</th></tr>
+      <tr><td class="mono">9f3a…c1</td><td class="n">112</td><td class="n">0,0021</td><td class="n">4.210</td></tr><tr><td class="mono">41be…07</td><td class="n">86</td><td class="n">0,0019</td><td class="n">2.930</td></tr><tr><td class="mono">c07d…e2</td><td class="n">31</td><td class="n">0,0024</td><td class="n">1.330</td></tr></table></div></div>
+  </div>
+  <div class="card" style="margin-top:14px"><h3>Panggilan mahal</h3><p class="hint">Query “API Call”: biaya ≥ Rp20 per panggilan</p><div class="tablewrap"><table><tr><th>Waktu</th><th>Fungsi</th><th class="n">Cache</th><th class="n">Rupiah</th></tr>
+    <tr><td>24 Okt 10.42</td><td>ai-chat</td><td class="n">0%</td><td class="n">31</td></tr><tr><td>23 Okt 21.07</td><td>receipt-analyze</td><td class="n">—</td><td class="n">24</td></tr></table></div></div>
+</section>
+
+<section class="sec" id="s-kuota">
+  <h1>Kuota AI</h1><p class="sub">Lihat dan reset pemakaian harian. Aksi yang mengubah banyak akun selalu minta konfirmasi.</p>
+  <div class="grid g2">
+    <div class="card"><h3>Reset satu akun</h3><div class="field"><label>Akun</label><input placeholder="email"></div><button class="btn">Reset akun ini</button></div>
+    <div class="card"><h3>Reset semua user</h3><p class="hint">Query “Reset Quota AI All User”: pemakaian akun dan perangkat jadi 0.</p><div class="warn">Memengaruhi semua akun. Butuh ketik RESET.</div><button class="btn dng" onclick="confirm_.classList.add('on')">Reset semua…</button></div>
+  </div>
+</section>
+
+<section class="sec" id="s-rilis">
+  <h1>Rilis dan pengaturan</h1><p class="sub">Versi aplikasi, fitur uji, dan parameter. Query “Update Min Version”, “Toggle Streak Test”, “Select URL”.</p>
+  <div class="grid g2">
+    <div class="card"><h3>Versi aplikasi</h3><p class="hint">Isi setelah versi baru masuk produksi.</p>
+      <div class="row2"><div class="field"><label>Versi terbaru</label><input value="1.7.8"></div><div class="field"><label>Build terbaru</label><input placeholder="mis. 55"></div></div>
+      <div class="field"><label>Versi minimum (di bawah ini dipaksa update)</label><input value="1.7.6"></div>
+      <div class="field"><label>Pesan (opsional)</label><input></div>
+      <div class="warn">Menaikkan versi minimum memblokir app versi lama. Cek dulu.</div>
+      <button class="btn">Simpan</button></div>
+    <div class="card"><h3>Fitur uji</h3><p class="hint">Tabel app_feature_flags</p>
+      <div class="tablewrap"><table><tr><td><b>streak_maskot</b><br><span class="hint">mascot streak</span></td><td class="n"><span class="switch on"></span></td></tr>
+      <tr><td><b>streak_test_menu</b><br><span class="hint">menu uji streak</span></td><td class="n"><span class="switch"></span></td></tr>
+      <tr><td><b>matcha</b><br><span class="hint">Traktir Matcha</span></td><td class="n"><span class="switch on"></span></td></tr></table></div></div>
+    <div class="card"><h3>Parameter</h3><p class="hint">Tabel app_parameters (angka kuota dan harga hidup di sini)</p>
+      <div class="field"><label>download_page_url</label><input value="https://play.google.com/store/apps/details?id=com.artosku"></div>
+      <div class="field"><label>Cari parameter lain</label><input placeholder="nama parameter"></div><button class="btn">Simpan</button></div>
+    <div class="card"><h3>Catatan pembaruan</h3><p class="hint">Tab versi di layar “Apa yang baru” (Indonesia, Inggris di katalog app)</p>
+      <div class="warn">Isinya daftar kalimat per versi; mengubahnya di sini harus ikut mengubah terjemahan Inggris di app.</div><button class="btn sec">Lihat daftar</button></div>
+  </div>
+</section>
+
+    </main>
+  </div>
+</div>
+<div class="demo">Contoh tampilan · data bukan asli</div>
+<script>
+if(location.search.includes('in'))document.getElementById('login').classList.remove('on');
+const confirm_=document.getElementById('confirm');
+const items=[['ringkasan','📊','Ringkasan'],['pengumuman','📢','Pengumuman'],['pengguna','👤','Pengguna'],['biaya','💸','Biaya AI'],['kuota','⏱️','Kuota AI'],['rilis','🚀','Rilis & pengaturan']];
+for(const id of ['nav1','nav2']){document.getElementById(id).innerHTML=items.map(([k,i,t])=>`<a href="#${k}" data-k="${k}"><span class="i">${i}</span>${t}</a>`).join('')}
+function route(){const k=(location.hash||'#ringkasan').slice(1);document.querySelectorAll('.sec').forEach(s=>s.classList.toggle('on',s.id==='s-'+k));document.querySelectorAll('.nav a').forEach(a=>a.classList.toggle('on',a.dataset.k===k))}
+addEventListener('hashchange',route);route();
+function bars(el,ax,vals,labels,fmt){const max=Math.max(...vals);document.getElementById(el).innerHTML=vals.map((v,i)=>`<div class="${i===vals.length-1?'now':''}" style="height:${Math.max(6,v/max*100)}%"><b>${i%3===vals.length%3||i===vals.length-1?fmt(v):''}</b></div>`).join('');document.getElementById(ax).innerHTML=labels.map((l,i)=>`<span>${i%2===(labels.length-1)%2?l:''}</span>`).join('')}
+const days=Array.from({length:14},(_,i)=>String(11+i>31?11+i-31:11+i));
+bars('bars1','axis1',[3,5,2,4,7,3,6,5,4,8,5,6,4,6],days,v=>v);
+bars('bars2','axis2',[2400,3100,1900,2800,3600,2100,2500,2700,1700,2300,3000,2270,2720,1840],days,v=>(v/1000).toFixed(1)+'rb');
+document.querySelectorAll('.switch').forEach(s=>s.onclick=()=>s.classList.toggle('on'));
+document.querySelectorAll('.tl button').forEach(b=>b.onclick=()=>{b.parentElement.querySelectorAll('button').forEach(x=>x.classList.remove('on'));b.classList.add('on')});
+</script>
+</body>
+</html>
