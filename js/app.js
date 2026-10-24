@@ -155,31 +155,66 @@
   addEventListener('hashchange', route);
 
   // ------------------------------------------------------------------ shared pieces
-  function bars(items, fmt) {
-    const max = Math.max(1, ...items.map((i) => i.v));
-    const n = items.length;
-    return `<div class="bars">${items.map((it, i) => `<div class="${i === n - 1 ? 'now' : ''}" style="height:${Math.max(4, (it.v / max) * 100)}%" title="${esc(it.l)}: ${esc(fmt(it.v))}"><b>${i % 3 === (n - 1) % 3 ? esc(fmt(it.v)) : ''}</b></div>`).join('')}</div>
-      <div class="axis">${items.map((it, i) => `<span>${i % 2 === (n - 1) % 2 ? esc(it.l) : ''}</span>`).join('')}</div>`;
+  // A chart: every bar has its number, and tapping a bar shows that day in full underneath.
+  const charts = {};
+  const longDay = (d) => new Date(d + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long' });
+  function chart(id, items, fmt, detail) {
+    charts[id] = { items, detail };
+    const n = items.length, max = Math.max(1, ...items.map((i) => i.v));
+    const every = n <= 16 ? 1 : n <= 31 ? 2 : 6;
+    const bars = items.map((it, i) => {
+      const show = (n - 1 - i) % every === 0;
+      return `<button type="button" class="bar${i === n - 1 ? ' now sel' : ''}" data-i="${i}" style="height:${Math.max(4, (it.v / max) * 100)}%" aria-label="${esc(longDay(it.d))}: ${esc(fmt(it.v))}"><b>${show ? esc(fmt(it.v)) : ''}</b></button>`;
+    }).join('');
+    const axis = items.map((it, i) => `<span>${(n - 1 - i) % every === 0 ? esc(dayLabel(it.d)) : ''}</span>`).join('');
+    return `<div class="chartbox" data-chart="${id}"><div class="bars">${bars}</div><div class="axis">${axis}</div><div class="cdetail">${detail(items, n - 1)}</div></div>`;
   }
+  function pickBar(bar) {
+    const box = bar.closest('.chartbox'), c = charts[box.dataset.chart];
+    if (!c) return;
+    box.querySelectorAll('.bar').forEach((b) => b.classList.toggle('sel', b === bar));
+    box.querySelector('.cdetail').innerHTML = c.detail(c.items, +bar.dataset.i);
+  }
+  const deltaText = (items, i, unit) => {
+    if (i === 0) return '';
+    const d = items[i].v - items[i - 1].v;
+    return ` · ${d >= 0 ? '+' : '−'}${unit(Math.abs(d))} dari hari sebelumnya`;
+  };
   const chip = (cls, t) => `<span class="chip ${cls}">${esc(t)}</span>`;
   const tierChip = (t) => (t === 'max' ? chip('bl', 'Max') : t === 'pro' ? chip('gr', 'Pro') : chip('mu', 'Free'));
 
   // ------------------------------------------------------------------ Ringkasan
+  let sumDays = 14;
   async function pgRingkasan() {
-    const [o, su, co] = await Promise.all([rpc('admin_overview'), rpc('admin_signups_per_day', { p_days: 14 }), rpc('admin_ai_cost_per_day', { p_days: 14 })]);
+    const [o, su, co, pf] = await Promise.all([rpc('admin_overview'), rpc('admin_signups_per_day', { p_days: sumDays }), rpc('admin_ai_cost_per_day', { p_days: sumDays }), rpc('admin_profit_estimate', { p_days: 30 })]);
     const y = Number(o.ai_cost_idr_yesterday || 0), t = Number(o.ai_cost_idr_today || 0);
     const delta = y > 0 ? Math.round(((t - y) / y) * 100) : null;
     const rel = o.release || {};
+    const rangeChips = [14, 30, 90].map((d) => `<button data-act="sum-days" data-v="${d}" class="${sumDays === d ? 'on' : ''}">${d} hari</button>`).join('');
+    const kindName = { 'bulan pertama': 'bulan pertama (harga diskon pelanggan baru)', bulanan: 'perpanjangan bulanan', tahunan: 'tahunan' };
+    const lines = (pf.lines || []).map((l) => `<tr><td>${esc(l.plan === 'max' ? 'Max' : 'Pro')} · ${esc(kindName[l.kind] || l.kind)} × ${num(l.n)}</td><td class="n">${rp(l.sum)}</td></tr>`).join('');
+    const profitCard = `<div class="card" style="margin-bottom:14px"><h3>Estimasi keuntungan ${pf.days} hari terakhir</h3>
+      <p class="hint">Perkiraan pendapatan langganan dikurangi potongan Google dan biaya AI. Bukan laporan keuangan.</p>
+      <div class="grid g2"><div><div class="kpi"><div class="v ${Number(pf.profit) < 0 ? 'down' : 'up'}">${Number(pf.profit) < 0 ? '−' : ''}${rp(Math.abs(pf.profit))}</div><div class="l">Estimasi keuntungan</div></div>
+        <p class="hint" style="margin-top:10px;line-height:1.5">Pembayaran pertama pelanggan baru dihitung dengan harga diskon. Belum termasuk donasi Traktir Matcha (tidak tercatat di server), pajak, dan pengembalian dana. Langganan hadiah tidak dihitung. Harga dan potongan bisa diubah di <a href="#rilis">Rilis dan pengaturan</a>.</p></div>
+        <div class="tablewrap"><table>${lines || '<tr><td class="hint">Belum ada pembayaran langganan di rentang ini.</td><td></td></tr>'}
+          <tr><td><b>Pendapatan kotor</b></td><td class="n"><b>${rp(pf.gross)}</b></td></tr>
+          <tr><td>− Potongan Google ${num(pf.fee_percent)}%</td><td class="n">${rp(pf.fee)}</td></tr>
+          <tr><td><b>Pendapatan bersih</b></td><td class="n"><b>${rp(pf.net)}</b></td></tr>
+          <tr><td>− Biaya AI (${num(pf.ai_calls)} permintaan)</td><td class="n">${rp(pf.ai_cost)}</td></tr>
+          ${Number(pf.gift_accounts) ? `<tr><td>${chip('am', 'Gratis')} ${num(pf.gift_accounts)} akun hadiah: biaya AI tidak dihitung</td><td class="n">${rp(pf.gift_ai_cost)}</td></tr>` : ''}</table></div></div></div>`;
     return `<h1>Ringkasan</h1><p class="sub">Angka utama. Hari dihitung WIB; akun uji tidak ikut biaya AI.</p>
+      ${profitCard}
       <div class="grid g4" style="margin-bottom:14px">
         <div class="card kpi"><div class="v">${num(o.signups_total)}</div><div class="l">Pendaftar total</div><div class="d up">+${num(o.signups_today)} hari ini</div></div>
         <div class="card kpi"><div class="v">${num(Number(o.pro) + Number(o.max))}</div><div class="l">Pro / Max aktif</div><div class="d">${num(o.pro)} Pro · ${num(o.max)} Max</div></div>
         <div class="card kpi"><div class="v">${rp(t)}</div><div class="l">Biaya AI hari ini</div><div class="d ${delta != null && delta > 0 ? 'down' : 'up'}">${delta == null ? '—' : (delta > 0 ? '+' : '') + delta + '% dari kemarin'}</div></div>
         <div class="card kpi"><div class="v">${num(o.ai_calls_today)}</div><div class="l">Panggilan AI hari ini</div><div class="d">cache ${o.cache_ratio_today == null ? '—' : Math.round(o.cache_ratio_today * 100) + '%'}</div></div>
       </div>
+      <div class="tl">${rangeChips}</div>
       <div class="grid g2">
-        <div class="card"><h3>Pendaftar per hari</h3><p class="hint">14 hari terakhir</p>${bars(su.map((r) => ({ l: dayLabel(r.day), v: Number(r.n) })), (v) => v)}</div>
-        <div class="card"><h3>Biaya AI per hari</h3><p class="hint">Rupiah</p>${bars(co.map((r) => ({ l: dayLabel(r.day), v: Number(r.cost_idr) })), (v) => (v >= 1000 ? (v / 1000).toFixed(1) + 'rb' : Math.round(v)))}</div>
+        <div class="card"><h3>Pendaftar per hari</h3><p class="hint">Ketuk batang untuk rinciannya</p>${chart('su', su.map((r) => ({ d: String(r.day).slice(0, 10), v: Number(r.n) })), (v) => num(v), (it, i) => `<b>${esc(longDay(it[i].d))}</b>: ${num(it[i].v)} pendaftar${deltaText(it, i, num)}`)}</div>
+        <div class="card"><h3>Biaya AI per hari</h3><p class="hint">Ketuk batang untuk rinciannya</p>${chart('co', co.map((r) => ({ d: String(r.day).slice(0, 10), v: Number(r.cost_idr), req: Number(r.requests) })), (v) => (v >= 1000 ? (v / 1000).toFixed(1) + 'rb' : String(Math.round(v))), (it, i) => `<b>${esc(longDay(it[i].d))}</b>: ${rp(it[i].v)} · ${num(it[i].req)} permintaan${deltaText(it, i, rp)}`)}</div>
       </div>
       <div class="card" style="margin-top:14px"><h3>Yang sedang aktif</h3><div class="tablewrap"><table>
         <tr><td>Pengumuman berlangsung</td><td>${Number(o.announcements_active) ? chip('red', o.announcements_active + ' aktif') : chip('gr', 'tidak ada')}</td><td class="n"><a href="#pengumuman">Buka</a></td></tr>
@@ -273,10 +308,10 @@
   let userQuery = '';
   async function pgPengguna() {
     const users = await rpc('admin_find_users', { p_q: userQuery });
-    const rows = users.map((u) => `<tr><td>${who(u.email)}<br><span class="hint">daftar ${when(u.created_at)} · masuk ${when(u.last_sign_in_at)}</span></td><td>${tierChip(u.subscription_type)}</td><td>${esc(u.tier_source || '—')}</td>
+    const rows = users.map((u) => `<tr><td>${who(u.email)}<br><span class="hint">daftar ${when(u.created_at)} · masuk ${when(u.last_sign_in_at)}</span></td><td>${tierChip(u.subscription_type)}</td><td>${u.tier_source === 'gift' ? chip('am', 'Gratis (hadiah)') : esc(u.tier_source || '—')}</td>
       <td class="n">${u.tier_source === 'play' ? '<span class="hint">dari Play</span>' : `<button class="btn sm sec" data-act="tier" data-email="${esc(u.email)}" data-type="${esc(u.subscription_type)}">Ubah</button>`}</td></tr>`).join('');
     return `<h1>Pengguna</h1><p class="sub">Cari akun dan ubah paketnya (hadiah). Paket yang berasal dari Google Play tidak bisa diubah di sini.</p>
-      <div class="card"><div class="row2" style="grid-template-columns:1fr auto auto;align-items:start"><div class="field" style="margin:0"><input id="uq" placeholder="email atau sebagian email" value="${esc(userQuery)}"></div><button class="btn" data-act="usearch">Cari</button><button class="btn sec" data-act="unmask">${unmask ? 'Sembunyikan email' : 'Tampilkan email'}</button></div>
+      <div class="card"><div class="searchrow"><input id="uq" placeholder="email atau sebagian email" value="${esc(userQuery)}"><button class="btn" data-act="usearch">Cari</button><button class="btn sec" data-act="unmask">${unmask ? 'Sembunyikan email' : 'Tampilkan email'}</button></div>
       <div class="tablewrap" style="margin-top:12px"><table><tr><th>Akun</th><th>Paket</th><th>Sumber</th><th></th></tr>${rows || '<tr><td colspan="4" class="hint">Tidak ada hasil.</td></tr>'}</table></div>
       <p class="hint" style="margin:10px 0 0">Menampilkan 25 terbaru. Cari dengan email untuk akun tertentu.</p></div>`;
   }
@@ -293,10 +328,11 @@
   const cost = { days: 7, fn: '', hideOwn: true };
   async function pgBiaya() {
     const fn = cost.fn || null;
-    const [perDay, perAcc, exp] = await Promise.all([
+    const [perDay, perAcc, exp, accProfit] = await Promise.all([
       rpc('admin_ai_cost_per_day', { p_days: cost.days, p_function: fn }),
       rpc('admin_ai_cost_per_account', { p_days: cost.days, p_function: fn, p_hide_own: cost.hideOwn }),
       rpc('admin_expensive_calls', { p_min_idr: 20, p_limit: 30 }),
+      rpc('admin_account_profit', { p_days: cost.days }),
     ]);
     const chips = [[1, 'Hari ini'], [7, '7 hari'], [30, '30 hari'], [90, '90 hari']].map(([d, t]) => `<button data-act="cost-days" data-v="${d}" class="${cost.days === d ? 'on' : ''}">${t}</button>`).join('');
     const total = perDay.reduce((s, r) => s + Number(r.cost_idr), 0), reqs = perDay.reduce((s, r) => s + Number(r.requests), 0);
@@ -309,6 +345,7 @@
         <div class="card"><h3>Per hari</h3><div class="tablewrap"><table><tr><th>Tanggal</th><th class="n">Permintaan</th><th class="n">USD</th><th class="n">Rupiah</th></tr>${[...perDay].reverse().slice(0, 31).map((r) => `<tr><td>${esc(String(r.day).slice(5))}</td><td class="n">${num(r.requests)}</td><td class="n">${usd(r.cost_usd)}</td><td class="n">${rp(r.cost_idr)}</td></tr>`).join('')}</table></div></div>
         <div class="card"><h3>Per akun</h3><p class="hint">${cost.days === 1 ? 'Hari ini' : cost.days + ' hari terakhir'} (hari ini WIB tidak dipisah)</p><div class="tablewrap"><table><tr><th>Akun</th><th class="n">Panggilan</th><th class="n">Rata-rata USD</th><th class="n">Rupiah</th></tr>${perAcc.slice(0, 25).map((r) => `<tr><td class="mono">${who(r.account_key)}</td><td class="n">${num(r.calls)}</td><td class="n">${usd(r.avg_usd)}</td><td class="n">${rp(r.cost_idr)}</td></tr>`).join('') || '<tr><td colspan="4" class="hint">Kosong.</td></tr>'}</table></div></div>
       </div>
+      <div class="card" style="margin-top:14px"><h3>Untung per akun</h3><p class="hint">${cost.days === 1 ? 'Hari ini' : cost.days + ' hari terakhir'}. Pendapatan bersih adalah perkiraan setelah potongan Google. Akun hadiah (gratis) tidak punya pendapatan, jadi untungnya dihitung Rp0 dan diberi tanda.</p><div class="tablewrap"><table><tr><th>Akun</th><th>Paket</th><th class="n">Biaya AI</th><th class="n">Pendapatan bersih</th><th class="n">Untung</th></tr>${accProfit.slice(0, 30).map((r) => `<tr><td class="mono">${who(r.account_key)}${r.is_gift ? ' ' + chip('am', 'Gratis') : ''}</td><td>${tierChip(r.subscription_type)}</td><td class="n">${rp(r.cost_idr)}</td><td class="n">${r.is_gift ? '—' : rp(r.net_idr)}</td><td class="n ${r.is_gift ? '' : Number(r.profit_idr) < 0 ? 'down' : 'up'}">${r.is_gift ? 'Rp0' : (Number(r.profit_idr) < 0 ? '−' : '') + rp(Math.abs(r.profit_idr))}</td></tr>`).join('') || '<tr><td colspan="5" class="hint">Kosong.</td></tr>'}</table></div></div>
       <div class="card" style="margin-top:14px"><h3>Panggilan mahal</h3><p class="hint">Biaya ≥ Rp20 per panggilan, 30 terbaru</p><div class="tablewrap"><table><tr><th>Waktu</th><th>Akun</th><th>Fungsi</th><th class="n">Cache</th><th class="n">Rupiah</th></tr>${exp.map((r) => `<tr><td>${when(r.created_at)}</td><td class="mono">${who(r.account_key)}</td><td>${esc(r.edge_function)}</td><td class="n">${r.cache_hit_ratio == null ? '—' : Math.round(r.cache_hit_ratio * 100) + '%'}</td><td class="n">${rp(r.cost_idr)}</td></tr>`).join('') || '<tr><td colspan="5" class="hint">Tidak ada.</td></tr>'}</table></div></div>`;
   }
 
@@ -337,7 +374,8 @@
 
   // ------------------------------------------------------------------ Rilis & pengaturan
   async function pgRilis() {
-    const [rel, flags, params, audit] = await Promise.all([rpc('admin_get_release'), rpc('admin_list_flags'), rpc('admin_list_parameters'), rpc('admin_audit_list', { p_limit: 15 })]);
+    const [rel, flags, params, audit, sets] = await Promise.all([rpc('admin_get_release'), rpc('admin_list_flags'), rpc('admin_list_parameters'), rpc('admin_audit_list', { p_limit: 15 }), rpc('admin_get_settings')]);
+    const SET_LABEL = { price_pro: 'Harga Pro per bulan', price_max: 'Harga Max per bulan', intro_pro: 'Pro bulan pertama (diskon)', intro_max: 'Max bulan pertama (diskon)', yearly_pro: 'Pro per tahun', yearly_max: 'Max per tahun', google_fee_percent: 'Potongan Google (%)' };
     return `<h1>Rilis dan pengaturan</h1><p class="sub">Versi aplikasi, fitur yang bisa dinyalakan, dan parameter. Setiap perubahan dicatat di riwayat.</p>
       <div class="grid g2">
         <div class="card"><h3>Versi aplikasi</h3><p class="hint">Isi setelah versi baru masuk produksi.</p>
@@ -347,6 +385,7 @@
           <div class="warn">Menaikkan versi minimum memblokir app versi lama. Cek dulu.</div><button class="btn" data-act="rel-save">Simpan</button></div>
         <div class="card"><h3>Fitur</h3><p class="hint">Tabel app_feature_flags. Ketuk untuk menyalakan atau mematikan.</p><div class="tablewrap"><table>${flags.map((f) => `<tr><td><b>${esc(f.key)}</b><br><span class="hint">${when(f.updated_at)}</span></td><td class="n"><span class="switch ${f.enabled ? 'on' : ''}" data-act="flag" data-key="${esc(f.key)}"></span></td></tr>`).join('')}</table></div></div>
         <div class="card"><h3>Parameter</h3><p class="hint">Tabel app_parameters (angka kuota dan harga ada di sini). Catatan pembaruan diubah lewat migrasi.</p>${params.map((p) => `<div class="field"><label>${esc(p.key)}</label><div style="display:flex;gap:8px"><input class="sm-input" data-pkey="${esc(p.key)}" value="${esc(p.value)}"><button class="btn sm" data-act="param-save" data-key="${esc(p.key)}">Simpan</button></div></div>`).join('')}</div>
+        <div class="card"><h3>Asumsi estimasi keuntungan</h3><p class="hint">Dipakai di Ringkasan. Samakan dengan harga di Play Console.</p>${sets.map((x) => `<div class="field"><label>${esc(SET_LABEL[x.key] || x.key)}</label><div style="display:flex;gap:8px"><input class="sm-input" inputmode="decimal" data-skey="${esc(x.key)}" value="${esc(x.value)}"><button class="btn sm" data-act="set-save" data-key="${esc(x.key)}">Simpan</button></div></div>`).join('')}</div>
         <div class="card"><h3>Riwayat aksi admin</h3><p class="hint">15 terakhir</p><div class="tablewrap"><table>${audit.map((a) => `<tr><td>${when(a.at)}<br><span class="hint">${esc(a.admin_email)}</span></td><td><b>${esc(a.action)}</b><br><span class="hint mono pm">${esc(JSON.stringify(a.detail))}</span></td></tr>`).join('') || '<tr><td class="hint">Belum ada.</td></tr>'}</table></div></div>
       </div>`;
   }
@@ -359,6 +398,10 @@
     const on = !el.classList.contains('on');
     try { await rpc('admin_set_flag', { p_key: el.dataset.key, p_enabled: on }); el.classList.toggle('on', on); toast(el.dataset.key + (on ? ' menyala.' : ' mati.')); } catch (e) { fail(e); }
   }
+  async function setSave(key) {
+    const el = $(`[data-skey="${CSS.escape(key)}"]`);
+    try { await rpc('admin_set_setting', { p_key: key, p_value: Number(String(el.value).replace(/[^0-9.]/g, '')) }); toast('Asumsi disimpan.'); } catch (e) { fail(e); }
+  }
   async function paramSave(key) {
     const el = $(`[data-pkey="${CSS.escape(key)}"]`);
     if (!confirm('Simpan parameter ' + key + '?')) return;
@@ -367,6 +410,8 @@
 
   // ------------------------------------------------------------------ events
   document.addEventListener('click', (ev) => {
+    const barBtn = ev.target.closest('.chartbox .bar');
+    if (barBtn) { pickBar(barBtn); return; }
     const kindBtn = ev.target.closest('#annkind button');
     if (kindBtn) { $$('#annkind button').forEach((b) => b.classList.remove('on')); kindBtn.classList.add('on'); return; }
     if (ev.target.id === 'modal') return closeModal();
@@ -385,7 +430,7 @@
       tier: () => tierModal(el.dataset.email, el.dataset.type), 'tier-save': () => tierSave(el.dataset.email),
       'cost-days': () => { cost.days = +el.dataset.v; route(); }, 'cost-own': () => { cost.hideOwn = !cost.hideOwn; route(); },
       'quota-one': quotaOne, 'quota-all': quotaAllModal, 'quota-all-do': quotaAllDo,
-      'rel-save': relSave, flag: () => flagToggle(el), 'param-save': () => paramSave(el.dataset.key),
+      'rel-save': relSave, 'set-save': () => setSave(el.dataset.key), 'sum-days': () => { sumDays = +el.dataset.v; route(); }, flag: () => flagToggle(el), 'param-save': () => paramSave(el.dataset.key),
     }[act];
     if (go) go();
   });
