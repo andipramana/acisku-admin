@@ -1,14 +1,26 @@
 # Artosku Admin
 
-Website admin untuk mengelola Artosku (laptop dan HP): pengumuman, pengguna, biaya AI, kuota AI, versi rilis, fitur uji, dan parameter.
+Website admin untuk mengelola Artosku (laptop dan HP): pengumuman, pengguna, biaya AI, kuota AI, versi rilis, fitur, dan parameter.
 
-Status: rancangan tampilan saja (`preview/index.html`, data contoh). Belum tersambung ke server.
+Halaman statis (HTML + JS), tanpa server sendiri. Bicara langsung ke Supabase project `klafrhlcxyyxdbrdenwk` memakai sesi admin yang sedang masuk.
 
-## Rencana singkat
-- Halaman statis (tanpa server sendiri), bicara langsung ke Supabase project `klafrhlcxyyxdbrdenwk`.
-- Masuk dengan Google; hanya akun dengan tanda admin di server yang diterima. Pemeriksaan ada di server (RLS dan fungsi), bukan hanya di halaman.
-- Kunci rahasia (service role) tidak pernah ada di repo atau di halaman.
-- Aksi yang mengubah banyak akun (reset kuota semua user) minta konfirmasi ketik.
+## Keamanan
+- Masuk dengan Google, lalu kode 6 digit (TOTP) dari aplikasi authenticator. Pertama kali: pindai QR yang tampil.
+- Semua aksi lewat fungsi database `admin_*` (migrasi `0127_admin_console.sql` di repo acisku). Setiap fungsi memanggil `is_admin()`: email ada di tabel `admin_users` DAN sesi sudah lolos MFA (aal2). Halaman yang diubah di browser tetap ditolak server.
+- Yang tersimpan di repo hanya URL project dan anon key (publik, sama seperti di app). Kunci service role tidak pernah ada di sini.
+- Semua perubahan dicatat di tabel `admin_audit` (tampil di Rilis dan pengaturan).
+- Push pengumuman lewat edge function `announce-push` yang memeriksa sesi admin yang sama.
 
-## Query tersimpan yang menjadi panel
-Count Registered User, Check New User, Lihat Cost, Call Per User, Cost Per User, API Call, Reset Quota AI All User, Toggle Streak Test, Update Min Version, Select URL.
+## Admin
+Akun admin ada di tabel `public.admin_users`. Menambah: `insert into public.admin_users(email) values ('...')`.
+Kalau authenticator hilang: hapus faktornya di Supabase (Authentication, Users, pilih akun, MFA).
+
+## Menjalankan di komputer
+```
+python -m http.server 8080
+```
+lalu buka `http://localhost:8080`. Alamat itu harus ada di Supabase, Authentication, URL Configuration, Redirect URLs.
+
+## Berkas
+- `index.html`, `css/app.css`, `js/app.js`, `js/config.js`
+- `preview/index.html`: rancangan tampilan dengan data contoh

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Artosku Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/app.css">
+<script>
+// the saved theme is applied before the first paint so there is no flash
+try { var t = localStorage.getItem('admin-theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}
+</script>
+</head>
+<body>
+<div id="gate" class="login on"><div class="box" id="gatebox"><div class="loading">Memuat…</div></div></div>
+<div class="modal" id="modal"><div class="box" id="modalbox"></div></div>
+<div id="toast" class="toast" style="display:none"></div>
+<div class="app" id="app" style="display:none">
+  <aside class="side">
+    <div class="brand">Artosku Admin<small id="projref"></small></div>
+    <nav class="nav" id="nav1"></nav>
+    <button class="themebtn" data-act="theme"></button>
+    <div class="me"><span id="me"></span><br><a href="#" data-act="signout">Keluar</a></div>
+  </aside>
+  <div>
+    <div class="mtop"><div class="row"><div class="t">Artosku Admin</div><button class="themebtn" data-act="theme"></button></div><nav class="nav" id="nav2"></nav></div>
+    <main class="main" id="main"></main>
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="js/config.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
