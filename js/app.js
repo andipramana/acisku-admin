@@ -147,10 +147,11 @@
     const page = PAGES.find((p) => p[0] === k) || PAGES[0];
     $$('.nav a').forEach((a) => a.classList.toggle('on', a.dataset.k === page[0]));
     const seq = ++routeSeq;
+    stopPlay(); afterRender = null;
     $('#main').innerHTML = '<div class="loading">Memuat…</div>';
     try {
       const html = await page[3]();
-      if (seq === routeSeq) $('#main').innerHTML = `<section class="page on">${html}</section>`;
+      if (seq === routeSeq) { $('#main').innerHTML = `<section class="page on">${html}</section>`; if (afterRender) { const f = afterRender; afterRender = null; f(); } }
     } catch (e) {
       if (seq === routeSeq) $('#main').innerHTML = `<div class="card"><h3>Gagal memuat</h3><p class="hint">${esc(e.message || e)}</p><button class="btn sec" data-act="reload">Coba lagi</button></div>`;
     }
@@ -192,6 +193,8 @@
     const d = items[i].v - items[i - 1].v;
     return ` · ${d >= 0 ? '+' : '−'}${unit(Math.abs(d))} dari hari sebelumnya`;
   };
+  const ctl = (label, inner) => `<div class="ctl-row"><span class="cl">${label}</span>${inner}</div>`;
+  const seg = (buttons) => `<div class="seg">${buttons}</div>`;
   const chip = (cls, t) => `<span class="chip ${cls}">${esc(t)}</span>`;
   const tierChip = (t) => (t === 'max' ? chip('bl', 'Max') : t === 'pro' ? chip('gr', 'Pro') : chip('mu', 'Free'));
 
@@ -234,7 +237,7 @@
         <div class="card kpi"><div class="v">${rp(t)}</div><div class="l">Biaya AI hari ini</div><div class="d ${delta != null && delta > 0 ? 'down' : 'up'}">${delta == null ? '—' : (delta > 0 ? '+' : '') + delta + '% dari kemarin'}</div></div>
         <div class="card kpi"><div class="v">${num(o.ai_calls_today)}</div><div class="l">Panggilan AI hari ini</div><div class="d">cache ${o.cache_ratio_today == null ? '—' : Math.round(o.cache_ratio_today * 100) + '%'}</div></div>
       </div>
-      <div class="tl">${rangeChips}</div>
+      <div class="ctl">${ctl('Grafik', seg(rangeChips))}</div>
       <div class="grid g2">
         <div class="card"><h3>Pendaftar per hari</h3><p class="hint">Ketuk batang untuk rinciannya</p>${chart('su', su.map((r) => ({ d: String(r.day).slice(0, 10), lab: dayLabel(r.day), aria: longDay(String(r.day).slice(0, 10)), v: Number(r.n) })), (v) => num(v), (it, i) => `<b>${esc(longDay(it[i].d))}</b>: ${num(it[i].v)} pendaftar${deltaText(it, i, num)}`)}</div>
         <div class="card"><h3>Biaya AI per hari</h3><p class="hint">Ketuk batang untuk rinciannya</p>${chart('co', co.map((r) => ({ d: String(r.day).slice(0, 10), lab: dayLabel(r.day), aria: longDay(String(r.day).slice(0, 10)), v: Number(r.cost_idr), req: Number(r.requests) })), (v) => (v >= 1000 ? (v / 1000).toFixed(1) + 'rb' : String(Math.round(v))), (it, i) => `<b>${esc(longDay(it[i].d))}</b>: ${rp(it[i].v)} · ${num(it[i].req)} permintaan${deltaText(it, i, rp)}`)}</div>
@@ -247,6 +250,86 @@
 
 
   // ------------------------------------------------------------------ Pendaftar
+
+  // ---- "Putar": the whole sign-up story as a growing line (slow at first, faster and faster)
+  let afterRender = null;
+  const play = { days: [], add: [], cum: [], raf: 0, running: false, u: 0, last: 0, speed: 'normal' };
+  const PLAY_MS = { santai: 45000, normal: 28000, cepat: 14000 };
+  const PL = { x0: 96, x1: 972, y0: 36, y1: 362 };
+  function stopPlay() { cancelAnimationFrame(play.raf); play.running = false; }
+  const niceMax = (v) => { const p = Math.pow(10, Math.floor(Math.log10(Math.max(v, 1)))); const m = v / p; return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 2.5 ? 2.5 : m <= 5 ? 5 : 10) * p; };
+
+  function playCard() {
+    const sp = [['santai', 'Santai'], ['normal', 'Normal'], ['cepat', 'Cepat']].map(([v, t]) => `<button data-act="pl-speed" data-v="${v}" class="${play.speed === v ? 'on' : ''}">${t}</button>`).join('');
+    return `<div class="card" style="margin-bottom:14px"><h3>Perjalanan pendaftar</h3>
+      <p class="hint">Dari pendaftar pertama sampai hari ini. Garis total pendaftar tumbuh hari demi hari: pelan di awal, makin cepat.</p>
+      <div class="play-head"><div><div class="pl-date" id="pl-date">—</div><div class="hint" id="pl-day"></div></div>
+        <div class="pl-box"><div class="pl-total" id="pl-total">0</div><div class="hint">total pendaftar</div></div>
+        <div class="pl-box"><div class="pl-add" id="pl-add">+0</div><div class="hint">hari ini</div></div></div>
+      <svg id="pl-svg" class="plsvg" viewBox="0 0 1000 420" role="img" aria-label="Pertumbuhan total pendaftar"></svg>
+      <div class="ctl" style="margin:10px 0 8px">${ctl('Putar', seg('<button class="on" id="pl-btn" data-act="pl-toggle">▶ Putar</button><button data-act="pl-replay">↺ Ulang</button>'))}${ctl('Kecepatan', seg(sp))}</div>
+      <input type="range" id="pl-slider" min="0" max="0" step="0.01" value="0" style="width:100%" aria-label="Geser hari"></div>`;
+  }
+  function renderPlay(f) {
+    const N = play.days.length;
+    if (!N) return;
+    f = Math.max(0, Math.min(N - 1, f));
+    const i = Math.floor(f), fr = f - i, j = Math.min(i + 1, N - 1);
+    const total = play.cum[i] + (play.cum[j] - play.cum[i]) * fr;
+    const ymax = niceMax(Math.max(4, total * 1.08));
+    const X = (k) => PL.x0 + (PL.x1 - PL.x0) * (N === 1 ? 0 : k / (N - 1));
+    const Y = (v) => PL.y1 - (PL.y1 - PL.y0) * (v / ymax);
+    const pts = [];
+    for (let k = 0; k <= i; k++) pts.push(`${X(k).toFixed(1)},${Y(play.cum[k]).toFixed(1)}`);
+    pts.push(`${X(f).toFixed(1)},${Y(total).toFixed(1)}`);
+    const hx = X(f), hy = Y(total);
+    const grid = [0, 0.25, 0.5, 0.75, 1].map((q) => `<line x1="${PL.x0}" x2="${PL.x1}" y1="${Y(ymax * q).toFixed(1)}" y2="${Y(ymax * q).toFixed(1)}" stroke="var(--line)" stroke-width="1"/><text x="${PL.x0 - 12}" y="${(Y(ymax * q) + 8).toFixed(1)}" text-anchor="end" font-size="24" fill="var(--muted)">${num(Math.round(ymax * q))}</text>`).join('');
+    const fmtD = (d) => new Date(d + 'T00:00:00').toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
+    const labelRight = hx > PL.x1 - 130;
+    const svg = $('#pl-svg');
+    if (!svg) return;
+    svg.innerHTML = `${grid}<polygon points="${X(0).toFixed(1)},${PL.y1} ${pts.join(' ')} ${hx.toFixed(1)},${PL.y1}" fill="var(--barnow)" opacity=".13"/>
+      <polyline points="${pts.join(' ')}" fill="none" stroke="var(--barnow)" stroke-width="6" stroke-linejoin="round" stroke-linecap="round"/>
+      <circle cx="${hx.toFixed(1)}" cy="${hy.toFixed(1)}" r="11" fill="var(--barnow)" stroke="var(--card)" stroke-width="4"/>
+      <text x="${(labelRight ? hx - 18 : hx + 18).toFixed(1)}" y="${Math.max(PL.y0 + 10, hy - 14).toFixed(1)}" text-anchor="${labelRight ? 'end' : 'start'}" font-size="34" font-weight="800" fill="var(--ink)">${num(Math.round(total))}</text>
+      <text x="${PL.x0}" y="408" font-size="24" fill="var(--muted)">${fmtD(play.days[0])}</text><text x="${PL.x1}" y="408" text-anchor="end" font-size="24" fill="var(--muted)">${fmtD(play.days[N - 1])}</text>`;
+    const d = play.days[i];
+    $('#pl-date').textContent = new Date(d + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    $('#pl-day').textContent = `Hari ke-${i + 1} dari ${N}`;
+    $('#pl-total').textContent = num(Math.round(total));
+    $('#pl-add').textContent = '+' + num(play.add[i]);
+    $('#pl-slider').value = String(f);
+  }
+  function initPlay(series) {
+    stopPlay();
+    play.days = series.map((r) => String(r.label));
+    play.add = series.map((r) => Number(r.n));
+    let c = 0; play.cum = play.add.map((v) => (c += v));
+    const sl = $('#pl-slider');
+    if (!sl) return;
+    sl.max = String(Math.max(0, play.days.length - 1));
+    play.u = 1;
+    renderPlay(play.days.length - 1);
+  }
+  function setPlayBtn() { const b = $('#pl-btn'); if (b) b.textContent = play.running ? '⏸ Jeda' : (play.u >= 1 ? '▶ Putar lagi' : '▶ Lanjut'); }
+  function playFrame(now) {
+    if (!play.running) return;
+    const total = PLAY_MS[play.speed];
+    play.u = Math.min(1, play.u + (now - play.last) / total);
+    play.last = now;
+    // u squared: the first days take their time, the last ones fly past
+    renderPlay((play.days.length - 1) * play.u * play.u);
+    if (play.u >= 1) { play.running = false; setPlayBtn(); return; }
+    play.raf = requestAnimationFrame(playFrame);
+  }
+  function playToggle() {
+    if (play.running) { stopPlay(); setPlayBtn(); return; }
+    if (play.u >= 1) play.u = 0;
+    play.running = true; play.last = performance.now(); setPlayBtn();
+    play.raf = requestAnimationFrame(playFrame);
+  }
+  function playReplay() { stopPlay(); play.u = 0; renderPlay(0); playToggle(); }
+
   const SG_KEY = 'admin-signup-prefs';
   const SG_DEFAULT = {
     series: { type: 'bar', range: '14', day: '' },
@@ -268,7 +351,7 @@
 
   function sgControls(c, prefs, ranges, opts) {
     const chips = (act, cur, list) => list.map(([v, t]) => `<button data-act="${act}" data-c="${c}" data-v="${v}" class="${String(cur) === String(v) ? 'on' : ''}">${t}</button>`).join('');
-    return `<div class="tl" style="margin-bottom:8px">${chips('sg-type', prefs.type, [['bar', 'Batang'], ['line', 'Garis']])}<span class="sep"></span>${chips('sg-range', prefs.range, ranges)}${opts && opts.metric ? '<span class="sep"></span>' + chips('sg-metric', prefs.metric, [['total', 'Jumlah'], ['avg', 'Rata-rata per hari']]) : ''}</div>`;
+    return `<div class="ctl">${ctl('Tampilan', seg(chips('sg-type', prefs.type, [['bar', 'Batang'], ['line', 'Garis']])))}${ctl('Rentang', seg(chips('sg-range', prefs.range, ranges)))}${opts && opts.metric ? ctl('Nilai', seg(chips('sg-metric', prefs.metric, [['total', 'Jumlah'], ['avg', 'Rata-rata/hari']]))) : ''}</div>`;
   }
 
   async function pgPendaftar() {
@@ -276,11 +359,13 @@
     const oneDay = sg.series.range === 'day';
     const day = sg.series.day || today;
     const sFrom = oneDay ? day : rangeFrom(sg.series.range);
-    const [ser, wd, hr] = await Promise.all([
+    const [ser, wd, hr, allSer] = await Promise.all([
       rpc('admin_signups_series', { p_from: sFrom, p_to: oneDay ? day : null, p_bucket: oneDay ? 'hour' : 'day' }),
       rpc('admin_signups_by_weekday', { p_from: rangeFrom(sg.weekday.range), p_to: null }),
       rpc('admin_signups_by_hour', { p_from: rangeFrom(sg.hour.range), p_to: null, p_dow: sg.hour.dow ? Number(sg.hour.dow) : null }),
+      rpc('admin_signups_series', { p_from: null, p_to: null, p_bucket: 'day' }),
     ]);
+    afterRender = () => initPlay(allSer);
 
     // 1. per day, or per hour of one day
     const sItems = ser.map((r) => oneDay
@@ -290,8 +375,8 @@
     const sDetail = (it, i) => oneDay
       ? `<b>Jam ${esc(it[i].hour)}.00–${esc(it[i].hour)}.59</b>: ${num(it[i].v)} pendaftar${i > 0 ? ' · ' + (it[i].v - it[i - 1].v >= 0 ? '+' : '−') + num(Math.abs(it[i].v - it[i - 1].v)) + ' dari jam sebelumnya' : ''}`
       : `<b>${esc(longDay(it[i].d))}</b>: ${num(it[i].v)} pendaftar${deltaText(it, i, num)}`;
-    const sRanges = [['day', 'Sehari (per jam)'], ['7', '7 hari'], ['14', '14 hari'], ['30', '30 hari'], ['all', 'Semua']];
-    const dayPicker = oneDay ? `<div class="field" style="max-width:220px"><label>Tanggal</label><input type="date" data-act="sg-day" data-c="series" value="${esc(day)}" max="${esc(today)}"></div>` : '';
+    const sRanges = [['day', 'Per jam'], ['7', '7 hari'], ['14', '14 hari'], ['30', '30 hari'], ['all', 'Semua']];
+    const dayPicker = oneDay ? `<div class="ctl"><div class="ctl-row"><span class="cl">Tanggal</span><input type="date" data-act="sg-day" data-c="series" value="${esc(day)}" max="${esc(today)}"></div></div>` : '';
     const sPeak = sItems.reduce((m, i) => (i.v > m.v ? i : m), sItems[0] || { v: 0, lab: '' });
 
     // 2. by weekday
@@ -310,6 +395,7 @@
     const fmtVal = (metric) => (metric === 'avg' ? avgFmt : (v) => num(v));
 
     return `<h1>Pendaftar</h1><p class="sub">Kapan orang mendaftar. Hari dan jam dihitung WIB. Ketuk batang atau titik untuk rinciannya; pengaturan tersimpan di browser ini.</p>
+      ${playCard()}
       <div class="card" style="margin-bottom:14px"><h3>Pendaftar ${oneDay ? 'per jam' : 'per hari'}</h3>
         <p class="hint">${oneDay ? 'Jam demi jam pada satu hari' : 'Satu batang per hari'} · total ${num(sTotal)}${sItems.length && sPeak.v ? ` · tertinggi ${esc(oneDay ? 'jam ' + sPeak.lab : longDay(sPeak.d))} (${num(sPeak.v)})` : ''}</p>
         ${sgControls('series', sg.series, sRanges)}${dayPicker}
@@ -320,7 +406,7 @@
           ${chart('sgW', wItems, fmtVal(wMetric), wDetail, { type: sg.weekday.type, sel: wItems.indexOf(wTop), noNow: true })}</div>
         <div class="card"><h3>Menurut jam</h3><p class="hint">Semua tanggal digabung, jam 00 sampai 23${hTop && hTop.v ? ` · paling ramai jam ${esc(hTop.hour)}.00` : ''}</p>
           ${sgControls('hour', sg.hour, hRanges, { metric: true })}
-          <div class="field" style="max-width:220px;margin:0 0 8px"><label>Hanya hari</label><select data-act="sg-dow" data-c="hour"><option value="">Semua hari</option>${DOW_LONG.map((n, i) => `<option value="${i + 1}" ${String(sg.hour.dow) === String(i + 1) ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+          <div class="ctl"><div class="ctl-row"><span class="cl">Hari</span><select data-act="sg-dow" data-c="hour"><option value="">Semua hari</option>${DOW_LONG.map((n, i) => `<option value="${i + 1}" ${String(sg.hour.dow) === String(i + 1) ? 'selected' : ''}>${n}</option>`).join('')}</select></div></div>
           ${chart('sgH', hItems, fmtVal(hMetric), hDetail, { type: sg.hour.type, sel: hItems.indexOf(hTop), noNow: true })}</div>
       </div>`;
   }
@@ -343,16 +429,18 @@
   const rpShort = (v) => (v >= 1e6 ? (v / 1e6).toFixed(1) + 'jt' : v >= 1000 ? (v / 1000).toFixed(1) + 'rb' : String(Math.round(v)));
   const PAGE_SIZE = 50;
 
-  const tierBadges = (r) => `${tierChip(r.subscription_type)}${r.is_gift ? ' ' + chip('am', 'Gratis') : ''}${r.is_system ? ' ' + chip('mu', 'Uji/sistem') : ''}${isPotential(r) ? ' ' + chip('bl', 'Potensial') : ''}`;
+  const tierBadges = (r) => `${tierChip(r.subscription_type)}${r.is_gift ? ' ' + chip('am', 'Gratis') : ''}${r.is_system ? ' ' + chip('mu', 'Uji/sistem') : ''}${isPotential(r) ? ' ' + chip('bl', 'Potensial') : ''}${isLoyal(r) ? ' ' + chip('gr', 'Rajin') : ''}`;
+  // keeps coming back: a streak of 7 or more days of AI use (customers only, not test or gifted accounts)
+  const isLoyal = (r) => !r.is_system && !r.is_gift && Number(r.longest_streak) >= 7;
   // a free (not gifted, not system) account that uses AI a lot: a likely buyer
   const isPotential = (r) => r.subscription_type === 'free' && !r.is_gift && !r.is_system && ((Number(r.active_days) >= 3 && Number(r.calls) >= 15) || Number(r.max_day_calls) >= 5);
 
   async function pgAnalisis() {
-    const tabs = [['all', 'Semua pengguna'], ['user', 'Per pengguna'], ['list', 'Daftar pengguna']].map(([k, t]) => `<button data-act="ai-tab" data-v="${k}" class="${aip.tab === k ? 'on' : ''}">${t}</button>`).join('');
+    const tabs = [['all', 'Semua'], ['user', 'Per pengguna'], ['list', 'Daftar']].map(([k, t]) => `<button data-act="ai-tab" data-v="${k}" class="${aip.tab === k ? 'on' : ''}">${t}</button>`).join('');
     const metricChips = [['calls', 'Hit'], ['cost', 'Biaya']].map(([k, t]) => `<button data-act="ai-metric" data-v="${k}" class="${aip.metric === k ? 'on' : ''}">${t}</button>`).join('');
     const fnSel = `<select data-act="ai-fn"><option value="">Semua fitur</option>${AI_FUNCTIONS.map((f) => `<option ${aip.fn === f ? 'selected' : ''}>${f}</option>`).join('')}</select>`;
     const head = `<h1>Analisis AI</h1><p class="sub">Pemakaian AI: berapa hit, berapa biayanya, kapan, dan siapa yang paling aktif. Semua akun dihitung. Hari dan jam WIB; pengaturan tersimpan di browser ini.</p>
-      <div class="tl">${tabs}<span style="flex:1"></span>${aip.tab === 'list' ? '' : metricChips}${fnSel}</div>`;
+      <div class="ctl">${ctl('Lihat', seg(tabs))}${aip.tab === 'list' ? '' : ctl('Ukuran', seg(metricChips))}${ctl('Fitur', fnSel)}</div>`;
     if (aip.tab === 'list') return head + (await aiList());
     if (aip.tab === 'user') return head + (await aiUser());
     return head + (await aiCharts(null));
@@ -381,8 +469,8 @@
       : { lab: dayLabel(r.label), aria: longDay(r.label), v: pick(r.calls, r.cost_idr), calls: Number(r.calls), cost: Number(r.cost_idr), d: r.label });
     const sTotalCalls = sItems.reduce((a, i) => a + i.calls, 0), sTotalCost = sItems.reduce((a, i) => a + i.cost, 0);
     const sDetail = (it, i) => `<b>${oneDay ? 'Jam ' + esc(it[i].hour) + '.00–' + esc(it[i].hour) + '.59' : esc(longDay(it[i].d))}</b>: ${both(it[i].calls, it[i].cost)}${i > 0 ? ' · ' + (it[i].v - it[i - 1].v >= 0 ? '+' : '−') + (isCost ? rp(Math.abs(it[i].v - it[i - 1].v)) : num(Math.abs(it[i].v - it[i - 1].v))) + (oneDay ? ' dari jam sebelumnya' : ' dari hari sebelumnya') : ''}`;
-    const sRanges = [['day', 'Sehari (per jam)'], ['7', '7 hari'], ['14', '14 hari'], ['30', '30 hari'], ['all', 'Semua']];
-    const dayPicker = oneDay ? `<div class="field" style="max-width:220px"><label>Tanggal</label><input type="date" data-act="sg-day" data-c="ai-series" value="${esc(day)}" max="${esc(today)}"></div>` : '';
+    const sRanges = [['day', 'Per jam'], ['7', '7 hari'], ['14', '14 hari'], ['30', '30 hari'], ['all', 'Semua']];
+    const dayPicker = oneDay ? `<div class="ctl"><div class="ctl-row"><span class="cl">Tanggal</span><input type="date" data-act="sg-day" data-c="ai-series" value="${esc(day)}" max="${esc(today)}"></div></div>` : '';
 
     const wMetric = aip.weekday.metric;
     const wItems = wd.map((r) => ({ lab: DOW_SHORT[r.dow - 1], aria: DOW_LONG[r.dow - 1], v: wMetric === 'avg' ? (r.days ? pick(r.calls, r.cost_idr) / r.days : 0) : pick(r.calls, r.cost_idr), calls: Number(r.calls), cost: Number(r.cost_idr), days: r.days, name: DOW_LONG[r.dow - 1] }));
@@ -407,7 +495,7 @@
           ${chart('aiW', wItems, wMetric === 'avg' ? fmtAvg : fmtV, wDetail, { type: aip.weekday.type, sel: wItems.indexOf(wTop), noNow: true })}</div>
         <div class="card"><h3>Menurut jam</h3><p class="hint">Semua tanggal digabung, jam 00 sampai 23${hTop && hTop.v ? ` · paling ${isCost ? 'mahal' : 'ramai'} jam ${esc(hTop.hour)}.00` : ''}</p>
           ${sgControls('ai-hour', aip.hour, hRanges, { metric: true })}
-          <div class="field" style="max-width:220px;margin:0 0 8px"><label>Hanya hari</label><select data-act="sg-dow" data-c="ai-hour"><option value="">Semua hari</option>${DOW_LONG.map((n, i) => `<option value="${i + 1}" ${String(aip.hour.dow) === String(i + 1) ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+          <div class="ctl"><div class="ctl-row"><span class="cl">Hari</span><select data-act="sg-dow" data-c="ai-hour"><option value="">Semua hari</option>${DOW_LONG.map((n, i) => `<option value="${i + 1}" ${String(aip.hour.dow) === String(i + 1) ? 'selected' : ''}>${n}</option>`).join('')}</select></div></div>
           ${chart('aiH', hItems, hMetric === 'avg' ? fmtAvg : fmtV, hDetail, { type: aip.hour.type, sel: hItems.indexOf(hTop), noNow: true })}</div>
       </div>`;
   }
@@ -461,23 +549,23 @@
     const rows = await rpc('admin_ai_users', { p_from: rangeFrom(L.range), p_to: null, p_tier: L.tier, p_q: L.q || null, p_sort: L.sort, p_limit: PAGE_SIZE, p_offset: L.page * PAGE_SIZE, p_function: aip.fn || null });
     const total = rows.length ? Number(rows[0].total_count) : 0;
     const chips = (act, cur, list) => list.map(([v, t]) => `<button data-act="${act}" data-v="${v}" class="${String(cur) === String(v) ? 'on' : ''}">${t}</button>`).join('');
-    const SORTS = [['calls', 'Hit terbanyak'], ['cost', 'Biaya terbesar'], ['active_days', 'Hari aktif terbanyak'], ['max_day', 'Hit terbanyak dalam sehari'], ['avg_cost', 'Biaya per hit tertinggi'], ['last_call', 'Terakhir pakai'], ['registered', 'Terbaru mendaftar']];
-    const body = rows.map((r) => `<tr><td class="mono">${who(r.account_key)}</td><td>${tierBadges(r)}</td><td>${r.registered_at ? esc(String(r.registered_at).slice(0, 10)) : '—'}</td><td class="n">${num(r.calls)}</td><td class="n">${rp(r.cost_idr)}</td><td class="n">${Number(r.calls) ? rp(r.avg_cost_idr) : '—'}</td><td class="n">${num(r.active_days)}</td><td class="n">${num(r.max_day_calls)}</td><td>${r.last_call ? when(r.last_call) : '—'}</td><td class="n">${avgFmt(Number(r.share_cost) * 100)}%</td><td class="n"><button class="btn sm sec" data-act="ai-pick" data-email="${esc(r.account_key)}">Analisis</button></td></tr>`).join('');
+    const SORTS = [['calls', 'Hit terbanyak'], ['cost', 'Biaya terbesar'], ['streak', 'Streak AI terpanjang'], ['current_streak', 'Streak AI yang sedang jalan'], ['active_days', 'Hari aktif terbanyak'], ['registered_asc', 'Paling awal mendaftar'], ['registered', 'Terbaru mendaftar'], ['max_day', 'Hit terbanyak dalam sehari'], ['avg_cost', 'Biaya per hit tertinggi'], ['last_call', 'Terakhir pakai']];
+    const body = rows.map((r) => `<tr class="clickrow" data-act="ai-pick" data-email="${esc(r.account_key)}" title="Klik untuk analisis akun ini"><td class="mono">${who(r.account_key)}</td><td>${tierBadges(r)}</td><td>${r.registered_at ? esc(String(r.registered_at).slice(0, 10)) : '—'}</td><td class="n">${num(r.calls)}</td><td class="n">${rp(r.cost_idr)}</td><td class="n">${Number(r.calls) ? rp(r.avg_cost_idr) : '—'}</td><td class="n">${num(r.active_days)}</td><td class="n">${num(r.max_day_calls)}</td><td class="n">${Number(r.longest_streak) ? `<b>${num(r.longest_streak)}</b> hari${Number(r.current_streak) ? `<br><span class="hint">sekarang ${num(r.current_streak)}</span>` : ''}` : '—'}</td><td>${r.last_call ? when(r.last_call) : '—'}</td><td class="n">${avgFmt(Number(r.share_cost) * 100)}%</td><td class="n"><button class="btn sm sec" data-act="ai-pick" data-email="${esc(r.account_key)}">Analisis</button></td></tr>`).join('');
     const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
     return `<div class="card"><h3>Daftar semua pengguna</h3>
-      <p class="hint">Semua akun terdaftar dengan pemakaian AI-nya. <b>Potensial</b> = akun Free (bukan hadiah) yang sering memakai AI: aktif di minimal 3 hari dengan minimal 15 hit, atau pernah 5 hit atau lebih dalam sehari. Mereka calon pelanggan berbayar.</p>
-      <div class="tl">${chips('ai-tier', L.tier, [['all', 'Semua paket'], ['free', 'Free'], ['pro', 'Pro'], ['max', 'Max'], ['gift', 'Gratis (hadiah)']])}<span class="sep"></span>${chips('ai-lrange', L.range, [['7', '7 hari'], ['30', '30 hari'], ['90', '90 hari'], ['all', 'Semua']])}</div>
-      <div class="searchrow" style="margin-bottom:10px"><input id="aiq" placeholder="cari email" value="${esc(L.q || '')}"><select data-act="ai-sort">${SORTS.map(([v, t]) => `<option value="${v}" ${L.sort === v ? 'selected' : ''}>${t}</option>`).join('')}</select><button class="btn" data-act="ai-lsearch">Cari</button><button class="btn sec" data-act="unmask">${unmask ? 'Sembunyikan email' : 'Tampilkan email'}</button><button class="btn sec" data-act="ai-csv">Unduh CSV</button></div>
-      <div class="tablewrap"><table><tr><th>Akun</th><th>Paket</th><th>Daftar</th><th class="n">Hit</th><th class="n">Biaya</th><th class="n">Biaya/hit</th><th class="n">Hari aktif</th><th class="n">Maks/hari</th><th>Terakhir</th><th class="n">Porsi biaya</th><th></th></tr>${body || '<tr><td colspan="11" class="hint">Tidak ada akun yang cocok.</td></tr>'}</table></div>
+      <p class="hint">Semua akun terdaftar dengan pemakaian AI-nya. <b>Potensial</b> = akun Free (bukan hadiah) yang sering memakai AI: aktif di minimal 3 hari dengan minimal 15 hit, atau pernah 5 hit atau lebih dalam sehari. Mereka calon pelanggan berbayar. <b>Rajin</b> = streak AI minimal 7 hari berturut-turut (pelanggan tetap). Streak dihitung dari seluruh riwayat, bukan dari rentang di bawah. Klik baris untuk menganalisis akunnya.</p>
+      <div class="ctl">${ctl('Paket', seg(chips('ai-tier', L.tier, [['all', 'Semua'], ['free', 'Free'], ['pro', 'Pro'], ['max', 'Max'], ['gift', 'Gratis']])))}${ctl('Rentang', seg(chips('ai-lrange', L.range, [['7', '7 hari'], ['30', '30 hari'], ['90', '90 hari'], ['all', 'Semua']])))}</div>
+      <div class="ctl"><div class="ctl-row"><span class="cl">Cari</span><input id="aiq" placeholder="cari email" value="${esc(L.q || '')}"></div><div class="ctl-row"><span class="cl">Urutkan</span><select data-act="ai-sort">${SORTS.map(([v, t]) => `<option value="${v}" ${L.sort === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div></div><div class="btnrow"><button class="btn sm" data-act="ai-lsearch">Cari</button><button class="btn sm sec" data-act="unmask">${unmask ? 'Sembunyikan email' : 'Tampilkan email'}</button><button class="btn sm sec" data-act="ai-csv">Unduh CSV</button></div>
+      <div class="tablewrap"><table><tr><th>Akun</th><th>Paket</th><th>Daftar</th><th class="n">Hit</th><th class="n">Biaya</th><th class="n">Biaya/hit</th><th class="n">Hari aktif</th><th class="n">Maks/hari</th><th class="n">Streak AI</th><th>Terakhir</th><th class="n">Porsi biaya</th><th></th></tr>${body || '<tr><td colspan="12" class="hint">Tidak ada akun yang cocok.</td></tr>'}</table></div>
       <div class="searchrow" style="margin-top:10px;align-items:center"><span class="hint">${num(total)} akun · halaman ${L.page + 1} dari ${pages}</span><span style="flex:1"></span><button class="btn sec sm" data-act="ai-page" data-d="-1" ${L.page <= 0 ? 'disabled' : ''}>Sebelumnya</button><button class="btn sec sm" data-act="ai-page" data-d="1" ${L.page + 1 >= pages ? 'disabled' : ''}>Berikutnya</button></div></div>`;
   }
   async function aiCsv() {
     const L = aip.list;
     try {
       const rows = await rpc('admin_ai_users', { p_from: rangeFrom(L.range), p_to: null, p_tier: L.tier, p_q: L.q || null, p_sort: L.sort, p_limit: 2000, p_offset: 0, p_function: aip.fn || null });
-      const head = ['email', 'paket', 'gratis', 'uji_sistem', 'potensial', 'daftar', 'hit', 'biaya_idr', 'biaya_per_hit_idr', 'hari_aktif', 'maks_hit_sehari', 'terakhir_pakai', 'porsi_biaya_persen'];
+      const head = ['email', 'paket', 'gratis', 'uji_sistem', 'potensial', 'daftar', 'hit', 'biaya_idr', 'biaya_per_hit_idr', 'hari_aktif', 'maks_hit_sehari', 'streak_ai_terpanjang', 'streak_ai_sekarang', 'rajin', 'terakhir_pakai', 'porsi_biaya_persen'];
       const q = (v) => '"' + String(v ?? '').replace(/"/g, '""') + '"';
-      const lines = rows.map((r) => [r.account_key, r.subscription_type, r.is_gift ? 'ya' : '', r.is_system ? 'ya' : '', isPotential(r) ? 'ya' : '', String(r.registered_at || '').slice(0, 10), r.calls, Math.round(r.cost_idr), Math.round(r.avg_cost_idr), r.active_days, r.max_day_calls, r.last_call || '', (Number(r.share_cost) * 100).toFixed(2)].map(q).join(','));
+      const lines = rows.map((r) => [r.account_key, r.subscription_type, r.is_gift ? 'ya' : '', r.is_system ? 'ya' : '', isPotential(r) ? 'ya' : '', String(r.registered_at || '').slice(0, 10), r.calls, Math.round(r.cost_idr), Math.round(r.avg_cost_idr), r.active_days, r.max_day_calls, r.longest_streak, r.current_streak, isLoyal(r) ? 'ya' : '', r.last_call || '', (Number(r.share_cost) * 100).toFixed(2)].map(q).join(','));
       const blob = new Blob([[head.map(q).join(','), ...lines].join('\n')], { type: 'text/csv;charset=utf-8' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob); a.download = 'pengguna-ai.csv'; document.body.appendChild(a); a.click(); a.remove();
@@ -504,7 +592,7 @@
       <div class="grid g2">
         <div class="card"><h3>Buat pengumuman</h3><p class="hint">Teks Indonesia dan Inggris wajib diisi.</p>
           <form id="annform">
-          <div class="tl" id="annkind"><button type="button" class="on" data-kind="gangguan">Gangguan</button><button type="button" data-kind="info">Info</button><button type="button" data-kind="pembaruan">Pembaruan</button></div>
+          <div class="seg" id="annkind" style="margin-bottom:12px"><button type="button" class="on" data-kind="gangguan">Gangguan</button><button type="button" data-kind="info">Info</button><button type="button" data-kind="pembaruan">Pembaruan</button></div>
           <div class="field"><label>Judul (Indonesia)</label><input name="title_id" required maxlength="120"></div>
           <div class="field"><label>Isi (Indonesia)</label><textarea name="body_id" required maxlength="1000"></textarea></div>
           <div class="field"><label>Judul (English)</label><input name="title_en" required maxlength="120"></div>
@@ -601,9 +689,7 @@
     const chips = [[1, 'Hari ini'], [7, '7 hari'], [30, '30 hari'], [90, '90 hari']].map(([d, t]) => `<button data-act="cost-days" data-v="${d}" class="${cost.days === d ? 'on' : ''}">${t}</button>`).join('');
     const total = perDay.reduce((s, r) => s + Number(r.cost_idr), 0), reqs = perDay.reduce((s, r) => s + Number(r.requests), 0);
     return `<h1>Biaya AI</h1><p class="sub">Dari tabel panggilan AI. Semua akun dihitung, termasuk akun uji dan sistem. Kurs Rp17.900 per USD.</p>
-      <div class="tl">${chips}<span style="flex:1"></span>
-        <select data-act="cost-fn"><option value="">Semua fitur</option>${['ai-chat', 'receipt-analyze', 'quick-add', 'scan', 'business-sale-parse'].map((f) => `<option ${cost.fn === f ? 'selected' : ''}>${f}</option>`).join('')}</select>
-        <button data-act="cost-own" class="${cost.hideOwn ? 'on' : ''}">Sembunyikan akun saya</button><button data-act="unmask" class="${unmask ? 'on' : ''}">Email penuh</button></div>
+      <div class="ctl">${ctl('Rentang', seg(chips))}${ctl('Fitur', `<select data-act="cost-fn"><option value="">Semua fitur</option>${['ai-chat', 'receipt-analyze', 'quick-add', 'scan', 'business-sale-parse'].map((f) => `<option ${cost.fn === f ? 'selected' : ''}>${f}</option>`).join('')}</select>`)}${ctl('Opsi', seg(`<button data-act="cost-own" class="${cost.hideOwn ? 'on' : ''}">Sembunyikan akun saya</button><button data-act="unmask" class="${unmask ? 'on' : ''}">Email penuh</button>`))}</div>
       <div class="grid g3" style="margin-bottom:14px"><div class="card kpi"><div class="v">${rp(total)}</div><div class="l">Biaya ${cost.days} hari</div></div><div class="card kpi"><div class="v">${num(reqs)}</div><div class="l">Permintaan</div></div><div class="card kpi"><div class="v">${reqs ? rp(total / reqs) : '—'}</div><div class="l">Rata-rata per permintaan</div></div></div>
       <div class="grid g2">
         <div class="card"><h3>Per hari</h3><div class="tablewrap"><table><tr><th>Tanggal</th><th class="n">Permintaan</th><th class="n">USD</th><th class="n">Rupiah</th></tr>${[...perDay].reverse().slice(0, 31).map((r) => `<tr><td>${esc(String(r.day).slice(5))}</td><td class="n">${num(r.requests)}</td><td class="n">${usd(r.cost_usd)}</td><td class="n">${rp(r.cost_idr)}</td></tr>`).join('')}</table></div></div>
@@ -759,7 +845,7 @@
       tier: () => tierModal(el.dataset.email, el.dataset.type), 'tier-save': () => tierSave(el.dataset.email),
       'cost-days': () => { cost.days = +el.dataset.v; route(); }, 'cost-own': () => { cost.hideOwn = !cost.hideOwn; route(); },
       'quota-one': quotaOne, 'quota-all': quotaAllModal, 'quota-all-do': quotaAllDo,
-      'ai-tab': () => { aip.tab = el.dataset.v; sgSave(); route(); }, 'ai-metric': () => { aip.metric = el.dataset.v; sgSave(); route(); }, 'ai-usearch': () => { aip.uq = ($('#aiq').value || '').trim(); sgSave(); route(); }, 'ai-pick': () => { aip.account = el.dataset.email; aip.tab = 'user'; aip.uq = ''; sgSave(); route(); }, 'ai-clear': () => { aip.account = ''; sgSave(); route(); }, 'ai-tier': () => { aip.list.tier = el.dataset.v; aip.list.page = 0; sgSave(); route(); }, 'ai-lrange': () => { aip.list.range = el.dataset.v; aip.list.page = 0; sgSave(); route(); }, 'ai-lsearch': () => { aip.list.q = ($('#aiq').value || '').trim(); aip.list.page = 0; sgSave(); route(); }, 'ai-page': () => { aip.list.page = Math.max(0, aip.list.page + Number(el.dataset.d)); sgSave(); route(); }, 'ai-csv': aiCsv, 'rel-save': relSave, 'ledger-add': () => ledgerAdd(el.dataset.kind), 'ledger-del': () => ledgerDel(el.dataset.id), 'sg-type': () => { prefOf(el.dataset.c).type = el.dataset.v; sgSave(); route(); }, 'sg-range': () => { prefOf(el.dataset.c).range = el.dataset.v; sgSave(); route(); }, 'sg-metric': () => { prefOf(el.dataset.c).metric = el.dataset.v; sgSave(); route(); }, 'set-save': () => setSave(el.dataset.key), 'sum-days': () => { sumDays = +el.dataset.v; route(); }, flag: () => flagToggle(el), 'param-save': () => paramSave(el.dataset.key),
+      'ai-tab': () => { aip.tab = el.dataset.v; sgSave(); route(); }, 'ai-metric': () => { aip.metric = el.dataset.v; sgSave(); route(); }, 'ai-usearch': () => { aip.uq = ($('#aiq').value || '').trim(); sgSave(); route(); }, 'ai-pick': () => { aip.account = el.dataset.email; aip.tab = 'user'; aip.uq = ''; sgSave(); route(); }, 'ai-clear': () => { aip.account = ''; sgSave(); route(); }, 'ai-tier': () => { aip.list.tier = el.dataset.v; aip.list.page = 0; sgSave(); route(); }, 'ai-lrange': () => { aip.list.range = el.dataset.v; aip.list.page = 0; sgSave(); route(); }, 'ai-lsearch': () => { aip.list.q = ($('#aiq').value || '').trim(); aip.list.page = 0; sgSave(); route(); }, 'ai-page': () => { aip.list.page = Math.max(0, aip.list.page + Number(el.dataset.d)); sgSave(); route(); }, 'ai-csv': aiCsv, 'pl-toggle': playToggle, 'pl-replay': playReplay, 'pl-speed': () => { play.speed = el.dataset.v; $$('[data-act=pl-speed]').forEach((b) => b.classList.toggle('on', b.dataset.v === play.speed)); },'rel-save': relSave, 'ledger-add': () => ledgerAdd(el.dataset.kind), 'ledger-del': () => ledgerDel(el.dataset.id), 'sg-type': () => { prefOf(el.dataset.c).type = el.dataset.v; sgSave(); route(); }, 'sg-range': () => { prefOf(el.dataset.c).range = el.dataset.v; sgSave(); route(); }, 'sg-metric': () => { prefOf(el.dataset.c).metric = el.dataset.v; sgSave(); route(); }, 'set-save': () => setSave(el.dataset.key), 'sum-days': () => { sumDays = +el.dataset.v; route(); }, flag: () => flagToggle(el), 'param-save': () => paramSave(el.dataset.key),
     }[act];
     if (go) go();
   });
@@ -774,6 +860,9 @@
     }
   });
   document.addEventListener('submit', (ev) => { if (ev.target.id === 'annform') { ev.preventDefault(); annSubmit(ev.target); } });
+  document.addEventListener('input', (ev) => {
+    if (ev.target.id === 'pl-slider') { stopPlay(); setPlayBtn(); const f = Number(ev.target.value); play.u = Math.sqrt(f / Math.max(1, play.days.length - 1)); renderPlay(f); }
+  });
   document.addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter' && ev.target.id === 'aiq') { const b = $('[data-act=ai-usearch]') || $('[data-act=ai-lsearch]'); if (b) b.click(); }
     if (ev.key === 'Enter' && ev.target.id === 'uq') { userQuery = ev.target.value.trim(); route(); }

@@ -107,3 +107,42 @@ textarea{min-height:76px;resize:vertical}
 .linebox .dot{position:absolute;width:12px;height:12px;margin:0 0 -6px -6px;border-radius:50%;background:var(--barnow);border:2px solid var(--card);padding:0;cursor:pointer}
 .linebox .dot.sel{outline:2px solid var(--ink)}
 .linebox .dot b{position:absolute;top:-17px;left:50%;transform:translateX(-50%);font-size:10px;font-weight:700;color:var(--muted);white-space:nowrap;pointer-events:none}
+
+.clickrow{cursor:pointer}
+.clickrow:hover td{background:var(--greenbg)}
+.play-head{display:flex;gap:18px;align-items:flex-end;flex-wrap:wrap;margin-bottom:6px}
+.play-head>div:first-child{flex:1 1 220px}
+.pl-date{font-size:18px;font-weight:800}
+.pl-box{text-align:right}
+.pl-total{font-size:34px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums}
+.pl-add{font-size:22px;font-weight:800;color:var(--green);line-height:1.1;font-variant-numeric:tabular-nums}
+.plsvg{width:100%;height:auto;display:block}
+input[type=range]{accent-color:var(--green);padding:0;border:0}
+
+/* grouped controls: a label and one compact joined row per setting */
+.ctl{margin-bottom:10px}
+.ctl-row{display:flex;align-items:center;gap:8px;margin-bottom:6px;min-width:0}
+.ctl-row .cl{flex:0 0 62px;font-size:11px;font-weight:700;color:var(--muted)}
+.ctl-row select,.ctl-row input{flex:1 1 auto;min-width:0;padding:6px 10px;font-size:13px;border-radius:10px}
+.seg{display:inline-flex;max-width:100%;overflow-x:auto;border:1px solid var(--line);border-radius:999px;background:var(--card);scrollbar-width:none}
+.seg::-webkit-scrollbar{display:none}
+.ctl-row .seg{flex:0 1 auto;min-width:0}
+.seg button{flex:0 0 auto;border:0;border-left:1px solid var(--line);border-radius:0;background:none;padding:6px 11px;font-size:12px;font-weight:700;white-space:nowrap;cursor:pointer;color:var(--ink)}
+.seg button:first-child{border-left:0}
+.seg button.on{background:var(--green);color:#fff}
+.btnrow{display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 12px}
+.tl{gap:5px;margin-bottom:10px}
+.tl button{padding:5px 10px}
+@media(max-width:700px){
+  .searchrow input{flex-basis:100%}
+  .searchrow .btn{padding:7px 12px;font-size:12px}
+  .ctl-row .cl{flex-basis:56px}
+}
+
+@media(max-width:700px){
+  .seg button{padding:6px 8px;font-size:11.5px}
+  .ctl-row .cl{flex-basis:52px}
+  .play-head>div:first-child{flex-basis:100%}
+  .play-head{gap:10px}
+  .play-head .pl-box{text-align:left}
+}
