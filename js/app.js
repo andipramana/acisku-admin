@@ -125,6 +125,7 @@
     ['pengumuman', '📢', 'Pengumuman', pgPengumuman],
     ['pengguna', '👤', 'Pengguna', pgPengguna],
     ['biaya', '💸', 'Biaya AI', pgBiaya],
+    ['analisis', '🧠', 'Analisis AI', pgAnalisis],
     ['keuangan', '💰', 'Keuangan', pgKeuangan],
     ['kuota', '⏱️', 'Kuota AI', pgKuota],
     ['rilis', '🚀', 'Rilis & pengaturan', pgRilis],
@@ -256,7 +257,8 @@
     try { const v = JSON.parse(localStorage.getItem(SG_KEY) || 'null'); if (v && v.series && v.weekday && v.hour) return v; } catch (e) { /* none saved */ }
     return JSON.parse(JSON.stringify(SG_DEFAULT));
   })();
-  const sgSave = () => { try { localStorage.setItem(SG_KEY, JSON.stringify(sg)); } catch (e) { /* private window */ } };
+  const sgSave = () => { try { localStorage.setItem(SG_KEY, JSON.stringify(sg)); localStorage.setItem(AI_KEY, JSON.stringify(aip)); } catch (e) { /* private window */ } };
+  const prefOf = (c) => (String(c).startsWith('ai-') ? aip[String(c).slice(3)] : sg[c]);
   const todayWib = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' });
   const addDays = (d, n) => { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
   const rangeFrom = (r) => (r === 'all' ? null : addDays(todayWib(), -(Number(r) - 1)));
@@ -289,7 +291,7 @@
       ? `<b>Jam ${esc(it[i].hour)}.00–${esc(it[i].hour)}.59</b>: ${num(it[i].v)} pendaftar${i > 0 ? ' · ' + (it[i].v - it[i - 1].v >= 0 ? '+' : '−') + num(Math.abs(it[i].v - it[i - 1].v)) + ' dari jam sebelumnya' : ''}`
       : `<b>${esc(longDay(it[i].d))}</b>: ${num(it[i].v)} pendaftar${deltaText(it, i, num)}`;
     const sRanges = [['day', 'Sehari (per jam)'], ['7', '7 hari'], ['14', '14 hari'], ['30', '30 hari'], ['all', 'Semua']];
-    const dayPicker = oneDay ? `<div class="field" style="max-width:220px"><label>Tanggal</label><input type="date" data-act="sg-day" value="${esc(day)}" max="${esc(today)}"></div>` : '';
+    const dayPicker = oneDay ? `<div class="field" style="max-width:220px"><label>Tanggal</label><input type="date" data-act="sg-day" data-c="series" value="${esc(day)}" max="${esc(today)}"></div>` : '';
     const sPeak = sItems.reduce((m, i) => (i.v > m.v ? i : m), sItems[0] || { v: 0, lab: '' });
 
     // 2. by weekday
@@ -318,9 +320,170 @@
           ${chart('sgW', wItems, fmtVal(wMetric), wDetail, { type: sg.weekday.type, sel: wItems.indexOf(wTop), noNow: true })}</div>
         <div class="card"><h3>Menurut jam</h3><p class="hint">Semua tanggal digabung, jam 00 sampai 23${hTop && hTop.v ? ` · paling ramai jam ${esc(hTop.hour)}.00` : ''}</p>
           ${sgControls('hour', sg.hour, hRanges, { metric: true })}
-          <div class="field" style="max-width:220px;margin:0 0 8px"><label>Hanya hari</label><select data-act="sg-dow"><option value="">Semua hari</option>${DOW_LONG.map((n, i) => `<option value="${i + 1}" ${String(sg.hour.dow) === String(i + 1) ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+          <div class="field" style="max-width:220px;margin:0 0 8px"><label>Hanya hari</label><select data-act="sg-dow" data-c="hour"><option value="">Semua hari</option>${DOW_LONG.map((n, i) => `<option value="${i + 1}" ${String(sg.hour.dow) === String(i + 1) ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
           ${chart('sgH', hItems, fmtVal(hMetric), hDetail, { type: sg.hour.type, sel: hItems.indexOf(hTop), noNow: true })}</div>
       </div>`;
+  }
+
+
+  // ------------------------------------------------------------------ Analisis AI
+  const AI_KEY = 'admin-ai-prefs';
+  const AI_DEFAULT = {
+    tab: 'all', metric: 'calls', fn: '', account: '',
+    series: { type: 'bar', range: '14', day: '' },
+    weekday: { type: 'bar', range: 'all', metric: 'total' },
+    hour: { type: 'bar', range: 'all', metric: 'total', dow: '' },
+    list: { tier: 'all', sort: 'calls', range: '30', q: '', page: 0 },
+  };
+  let aip = (() => {
+    try { const v = JSON.parse(localStorage.getItem(AI_KEY) || 'null'); if (v && v.series && v.weekday && v.hour && v.list) return v; } catch (e) { /* none saved */ }
+    return JSON.parse(JSON.stringify(AI_DEFAULT));
+  })();
+  const AI_FUNCTIONS = ['ai-chat', 'quick-add-categorize', 'category-icon-suggest', 'receipt-analyze', 'mutation-pdf-parse', 'scan-categorize', 'business-sale-parse'];
+  const rpShort = (v) => (v >= 1e6 ? (v / 1e6).toFixed(1) + 'jt' : v >= 1000 ? (v / 1000).toFixed(1) + 'rb' : String(Math.round(v)));
+  const PAGE_SIZE = 50;
+
+  const tierBadges = (r) => `${tierChip(r.subscription_type)}${r.is_gift ? ' ' + chip('am', 'Gratis') : ''}${r.is_system ? ' ' + chip('mu', 'Uji/sistem') : ''}${isPotential(r) ? ' ' + chip('bl', 'Potensial') : ''}`;
+  // a free (not gifted, not system) account that uses AI a lot: a likely buyer
+  const isPotential = (r) => r.subscription_type === 'free' && !r.is_gift && !r.is_system && ((Number(r.active_days) >= 3 && Number(r.calls) >= 15) || Number(r.max_day_calls) >= 5);
+
+  async function pgAnalisis() {
+    const tabs = [['all', 'Semua pengguna'], ['user', 'Per pengguna'], ['list', 'Daftar pengguna']].map(([k, t]) => `<button data-act="ai-tab" data-v="${k}" class="${aip.tab === k ? 'on' : ''}">${t}</button>`).join('');
+    const metricChips = [['calls', 'Hit'], ['cost', 'Biaya']].map(([k, t]) => `<button data-act="ai-metric" data-v="${k}" class="${aip.metric === k ? 'on' : ''}">${t}</button>`).join('');
+    const fnSel = `<select data-act="ai-fn"><option value="">Semua fitur</option>${AI_FUNCTIONS.map((f) => `<option ${aip.fn === f ? 'selected' : ''}>${f}</option>`).join('')}</select>`;
+    const head = `<h1>Analisis AI</h1><p class="sub">Pemakaian AI: berapa hit, berapa biayanya, kapan, dan siapa yang paling aktif. Semua akun dihitung. Hari dan jam WIB; pengaturan tersimpan di browser ini.</p>
+      <div class="tl">${tabs}<span style="flex:1"></span>${aip.tab === 'list' ? '' : metricChips}${fnSel}</div>`;
+    if (aip.tab === 'list') return head + (await aiList());
+    if (aip.tab === 'user') return head + (await aiUser());
+    return head + (await aiCharts(null));
+  }
+
+  // ---- charts + written summary for one scope (null = everybody)
+  async function aiCharts(account) {
+    const today = todayWib();
+    const oneDay = aip.series.range === 'day';
+    const day = aip.series.day || today;
+    const fn = aip.fn || null;
+    const [ser, wd, hr, sum] = await Promise.all([
+      rpc('admin_ai_series', { p_account: account, p_from: oneDay ? day : rangeFrom(aip.series.range), p_to: oneDay ? day : null, p_bucket: oneDay ? 'hour' : 'day', p_function: fn }),
+      rpc('admin_ai_by_weekday', { p_account: account, p_from: rangeFrom(aip.weekday.range), p_to: null, p_function: fn }),
+      rpc('admin_ai_by_hour', { p_account: account, p_from: rangeFrom(aip.hour.range), p_to: null, p_dow: aip.hour.dow ? Number(aip.hour.dow) : null, p_function: fn }),
+      rpc('admin_ai_summary', { p_account: account, p_from: rangeFrom(aip.series.range === 'day' ? '14' : aip.series.range), p_to: null, p_function: fn }),
+    ]);
+    const isCost = aip.metric === 'cost';
+    const fmtV = (v) => (isCost ? rpShort(v) : num(v));
+    const fmtAvg = (v) => (isCost ? rpShort(v) : avgFmt(v));
+    const both = (calls, cost) => `${num(calls)} hit · ${rp(cost)}`;
+    const pick = (calls, cost) => (isCost ? Number(cost) : Number(calls));
+
+    const sItems = ser.map((r) => oneDay
+      ? { lab: r.label, aria: 'Jam ' + r.label, v: pick(r.calls, r.cost_idr), calls: Number(r.calls), cost: Number(r.cost_idr), hour: r.label }
+      : { lab: dayLabel(r.label), aria: longDay(r.label), v: pick(r.calls, r.cost_idr), calls: Number(r.calls), cost: Number(r.cost_idr), d: r.label });
+    const sTotalCalls = sItems.reduce((a, i) => a + i.calls, 0), sTotalCost = sItems.reduce((a, i) => a + i.cost, 0);
+    const sDetail = (it, i) => `<b>${oneDay ? 'Jam ' + esc(it[i].hour) + '.00–' + esc(it[i].hour) + '.59' : esc(longDay(it[i].d))}</b>: ${both(it[i].calls, it[i].cost)}${i > 0 ? ' · ' + (it[i].v - it[i - 1].v >= 0 ? '+' : '−') + (isCost ? rp(Math.abs(it[i].v - it[i - 1].v)) : num(Math.abs(it[i].v - it[i - 1].v))) + (oneDay ? ' dari jam sebelumnya' : ' dari hari sebelumnya') : ''}`;
+    const sRanges = [['day', 'Sehari (per jam)'], ['7', '7 hari'], ['14', '14 hari'], ['30', '30 hari'], ['all', 'Semua']];
+    const dayPicker = oneDay ? `<div class="field" style="max-width:220px"><label>Tanggal</label><input type="date" data-act="sg-day" data-c="ai-series" value="${esc(day)}" max="${esc(today)}"></div>` : '';
+
+    const wMetric = aip.weekday.metric;
+    const wItems = wd.map((r) => ({ lab: DOW_SHORT[r.dow - 1], aria: DOW_LONG[r.dow - 1], v: wMetric === 'avg' ? (r.days ? pick(r.calls, r.cost_idr) / r.days : 0) : pick(r.calls, r.cost_idr), calls: Number(r.calls), cost: Number(r.cost_idr), days: r.days, name: DOW_LONG[r.dow - 1] }));
+    const wTop = wItems.reduce((m, i) => (i.v > m.v ? i : m), wItems[0]);
+    const wDetail = (it, i) => `<b>${esc(it[i].name)}</b>: ${both(it[i].calls, it[i].cost)} dari ${num(it[i].days)} hari ${esc(it[i].name)} · rata-rata ${avgFmt(it[i].days ? it[i].calls / it[i].days : 0)} hit dan ${rp(it[i].days ? it[i].cost / it[i].days : 0)} per hari`;
+
+    const hMetric = aip.hour.metric;
+    const hItems = hr.map((r) => ({ lab: String(r.hour).padStart(2, '0'), aria: 'Jam ' + String(r.hour).padStart(2, '0'), v: hMetric === 'avg' ? (r.days ? pick(r.calls, r.cost_idr) / r.days : 0) : pick(r.calls, r.cost_idr), calls: Number(r.calls), cost: Number(r.cost_idr), days: r.days, hour: String(r.hour).padStart(2, '0') }));
+    const hTop = hItems.reduce((m, i) => (i.v > m.v ? i : m), hItems[0]);
+    const hDetail = (it, i) => `<b>Jam ${esc(it[i].hour)}.00–${esc(it[i].hour)}.59</b>: ${both(it[i].calls, it[i].cost)}${it[i].days ? ` dari ${num(it[i].days)} hari · rata-rata ${avgFmt(it[i].calls / it[i].days)} hit dan ${rp(it[i].cost / it[i].days)} per hari` : ''}`;
+    const wRanges = [['14', '14 hari'], ['30', '30 hari'], ['90', '90 hari'], ['all', 'Semua']];
+    const hRanges = [['7', '7 hari'], ['14', '14 hari'], ['30', '30 hari'], ['90', '90 hari'], ['all', 'Semua']];
+
+    return aiSummaryCard(sum, account) + `
+      <div class="card" style="margin-bottom:14px"><h3>${isCost ? 'Biaya' : 'Hit'} ${oneDay ? 'per jam' : 'per hari'}</h3>
+        <p class="hint">${oneDay ? 'Jam demi jam pada satu hari' : 'Satu batang per hari'} · total ${num(sTotalCalls)} hit, ${rp(sTotalCost)}</p>
+        ${sgControls('ai-series', aip.series, sRanges)}${dayPicker}
+        ${chart('aiS', sItems, fmtV, sDetail, { type: aip.series.type, noNow: oneDay })}</div>
+      <div class="grid g2">
+        <div class="card"><h3>Menurut hari dalam seminggu</h3><p class="hint">Semua tanggal digabung${wTop && wTop.v ? ` · paling ${isCost ? 'mahal' : 'ramai'} ${esc(wTop.name)}` : ''}</p>
+          ${sgControls('ai-weekday', aip.weekday, wRanges, { metric: true })}
+          ${chart('aiW', wItems, wMetric === 'avg' ? fmtAvg : fmtV, wDetail, { type: aip.weekday.type, sel: wItems.indexOf(wTop), noNow: true })}</div>
+        <div class="card"><h3>Menurut jam</h3><p class="hint">Semua tanggal digabung, jam 00 sampai 23${hTop && hTop.v ? ` · paling ${isCost ? 'mahal' : 'ramai'} jam ${esc(hTop.hour)}.00` : ''}</p>
+          ${sgControls('ai-hour', aip.hour, hRanges, { metric: true })}
+          <div class="field" style="max-width:220px;margin:0 0 8px"><label>Hanya hari</label><select data-act="sg-dow" data-c="ai-hour"><option value="">Semua hari</option>${DOW_LONG.map((n, i) => `<option value="${i + 1}" ${String(aip.hour.dow) === String(i + 1) ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+          ${chart('aiH', hItems, hMetric === 'avg' ? fmtAvg : fmtV, hDetail, { type: aip.hour.type, sel: hItems.indexOf(hTop), noNow: true })}</div>
+      </div>`;
+  }
+
+  function aiSummaryCard(sm, account) {
+    const days = Number(sm.days_in_range) || 1, calls = Number(sm.calls), cost = Number(sm.cost_idr), aDays = Number(sm.active_days);
+    const users = Number(sm.active_users);
+    const kpi = (v, l) => `<div class="card kpi"><div class="v">${v}</div><div class="l">${l}</div></div>`;
+    const rows = [
+      ['Hit per hari (seluruh rentang)', avgFmt(calls / days)],
+      ['Hit per hari aktif', avgFmt(aDays ? calls / aDays : 0)],
+      ['Biaya per hari (seluruh rentang)', rp(cost / days)],
+      ['Biaya per hari aktif', rp(aDays ? cost / aDays : 0)],
+      ['Biaya rata-rata per hit', rp(calls ? cost / calls : 0)],
+      ['Hari aktif', `${num(aDays)} dari ${num(days)} hari`],
+      ...(account ? [] : [['Pengguna aktif', num(users)], ['Hit rata-rata per pengguna aktif', avgFmt(users ? calls / users : 0)], ['Biaya rata-rata per pengguna aktif', rp(users ? cost / users : 0)]]),
+      ['Hit gagal (ada pesan error)', `${num(sm.errors)}${calls ? ' (' + avgFmt((Number(sm.errors) / calls) * 100) + '%)' : ''}`],
+    ];
+    const pd = sm.peak_day, pc = sm.peak_cost_day, ph = sm.peak_hour, pw = sm.peak_weekday;
+    const reads = [];
+    if (pd && Number(pd.calls)) reads.push(`Hari paling ramai: <b>${esc(longDay(String(pd.day)))}</b> dengan ${num(pd.calls)} hit${pc && String(pc.day) !== String(pd.day) ? `; hari paling mahal: <b>${esc(longDay(String(pc.day)))}</b> (${rp(pc.cost_idr)})` : ` (${rp(pd.cost_idr)})`}.`);
+    if (pw && Number(pw.calls)) reads.push(`Paling sering dipakai pada hari <b>${esc(DOW_LONG[pw.dow - 1])}</b> (${num(pw.calls)} hit di seluruh rentang).`);
+    if (ph && Number(ph.calls)) reads.push(`Jam tersibuk: <b>${String(ph.hour).padStart(2, '0')}.00</b> (${num(ph.calls)} hit).`);
+    const fns = (sm.functions || []).map((f) => `<tr><td>${esc(f.fn)}</td><td class="n">${num(f.calls)}</td><td class="n">${calls ? avgFmt((Number(f.calls) / calls) * 100) + '%' : '—'}</td><td class="n">${rp(f.cost_idr)}</td><td class="n">${cost ? avgFmt((Number(f.cost_idr) / cost) * 100) + '%' : '—'}</td></tr>`).join('');
+    return `<div class="card" style="margin-bottom:14px"><h3>Rangkuman${account ? ' pengguna ini' : ' semua pengguna'}</h3>
+      <p class="hint">${esc(String(sm.from))} sampai ${esc(String(sm.to))}${aip.fn ? ' · fitur ' + esc(aip.fn) : ''}. Rentang mengikuti pilihan grafik pertama di bawah (mode sehari dihitung 14 hari).</p>
+      <div class="grid g4" style="margin-bottom:12px">${kpi(num(calls), 'Total hit')}${kpi(rp(cost), 'Total biaya')}${kpi(rp(calls ? cost / calls : 0), 'Biaya per hit')}${kpi(account ? num(aDays) + ' hari' : num(users), account ? 'Hari aktif' : 'Pengguna aktif')}</div>
+      <div class="grid g2"><div class="tablewrap"><table>${rows.map(([a, b]) => `<tr><td>${a}</td><td class="n"><b>${b}</b></td></tr>`).join('')}</table></div>
+        <div><p style="margin:0 0 8px;font-weight:700">Cara membacanya</p>${reads.length ? reads.map((r) => `<p class="hint" style="margin:0 0 6px;line-height:1.5">${r}</p>`).join('') : '<p class="hint">Belum ada pemakaian di rentang ini.</p>'}
+          <div class="tablewrap" style="margin-top:8px"><table><tr><th>Fitur</th><th class="n">Hit</th><th class="n">%</th><th class="n">Biaya</th><th class="n">%</th></tr>${fns || '<tr><td colspan="5" class="hint">Kosong.</td></tr>'}</table></div></div></div></div>`;
+  }
+
+  // ---- one chosen account
+  async function aiUser() {
+    const quick = aip.account ? [] : await rpc('admin_ai_users', { p_from: rangeFrom('30'), p_to: null, p_tier: 'all', p_q: null, p_sort: 'calls', p_limit: 10, p_offset: 0, p_function: null });
+    const res = aip.uq ? await rpc('admin_find_users', { p_q: aip.uq }) : [];
+    const picker = `<div class="card" style="margin-bottom:14px"><h3>Pilih pengguna</h3>
+      <div class="searchrow"><input id="aiq" placeholder="email atau sebagian email" value="${esc(aip.uq || '')}"><button class="btn" data-act="ai-usearch">Cari</button><button class="btn sec" data-act="unmask">${unmask ? 'Sembunyikan email' : 'Tampilkan email'}</button></div>
+      ${res.length ? `<div class="tablewrap" style="margin-top:10px"><table>${res.map((u) => `<tr><td>${who(u.email)}</td><td>${tierChip(u.subscription_type)}${u.tier_source === 'gift' ? ' ' + chip('am', 'Gratis') : ''}</td><td class="n"><button class="btn sm" data-act="ai-pick" data-email="${esc(u.email)}">Analisis</button></td></tr>`).join('')}</table></div>` : ''}
+      ${quick.length ? `<p class="hint" style="margin:12px 0 6px">Paling aktif 30 hari terakhir</p><div class="tablewrap"><table>${quick.map((r) => `<tr><td class="mono">${who(r.account_key)}</td><td>${tierBadges(r)}</td><td class="n">${num(r.calls)} hit</td><td class="n"><button class="btn sm" data-act="ai-pick" data-email="${esc(r.account_key)}">Analisis</button></td></tr>`).join('')}</table></div>` : ''}</div>`;
+    if (!aip.account) return picker + '<div class="card"><p class="hint">Pilih pengguna di atas untuk melihat grafik pemakaiannya.</p></div>';
+    const info = (await rpc('admin_ai_users', { p_from: null, p_to: null, p_tier: 'all', p_q: aip.account, p_sort: 'calls', p_limit: 5, p_offset: 0, p_function: null })).find((r) => r.account_key === aip.account.toLowerCase());
+    const header = info ? `<div class="card" style="margin-bottom:14px"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><b class="mono">${who(info.account_key)}</b>${tierBadges(info)}<span style="flex:1"></span><button class="btn sec sm" data-act="ai-clear">Ganti pengguna</button></div>
+      <p class="hint" style="margin:8px 0 0">Daftar ${when(info.registered_at)} · terakhir masuk ${when(info.last_sign_in_at)} · terakhir pakai AI ${when(info.last_call)} · sepanjang waktu ${num(info.calls)} hit, ${rp(info.cost_idr)}</p></div>` : `<div class="card" style="margin-bottom:14px"><b class="mono">${who(aip.account)}</b> <button class="btn sec sm" data-act="ai-clear">Ganti pengguna</button></div>`;
+    return picker + header + (await aiCharts(aip.account));
+  }
+
+  // ---- everybody, with tier labels
+  async function aiList() {
+    const L = aip.list;
+    const rows = await rpc('admin_ai_users', { p_from: rangeFrom(L.range), p_to: null, p_tier: L.tier, p_q: L.q || null, p_sort: L.sort, p_limit: PAGE_SIZE, p_offset: L.page * PAGE_SIZE, p_function: aip.fn || null });
+    const total = rows.length ? Number(rows[0].total_count) : 0;
+    const chips = (act, cur, list) => list.map(([v, t]) => `<button data-act="${act}" data-v="${v}" class="${String(cur) === String(v) ? 'on' : ''}">${t}</button>`).join('');
+    const SORTS = [['calls', 'Hit terbanyak'], ['cost', 'Biaya terbesar'], ['active_days', 'Hari aktif terbanyak'], ['max_day', 'Hit terbanyak dalam sehari'], ['avg_cost', 'Biaya per hit tertinggi'], ['last_call', 'Terakhir pakai'], ['registered', 'Terbaru mendaftar']];
+    const body = rows.map((r) => `<tr><td class="mono">${who(r.account_key)}</td><td>${tierBadges(r)}</td><td>${r.registered_at ? esc(String(r.registered_at).slice(0, 10)) : '—'}</td><td class="n">${num(r.calls)}</td><td class="n">${rp(r.cost_idr)}</td><td class="n">${Number(r.calls) ? rp(r.avg_cost_idr) : '—'}</td><td class="n">${num(r.active_days)}</td><td class="n">${num(r.max_day_calls)}</td><td>${r.last_call ? when(r.last_call) : '—'}</td><td class="n">${avgFmt(Number(r.share_cost) * 100)}%</td><td class="n"><button class="btn sm sec" data-act="ai-pick" data-email="${esc(r.account_key)}">Analisis</button></td></tr>`).join('');
+    const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    return `<div class="card"><h3>Daftar semua pengguna</h3>
+      <p class="hint">Semua akun terdaftar dengan pemakaian AI-nya. <b>Potensial</b> = akun Free (bukan hadiah) yang sering memakai AI: aktif di minimal 3 hari dengan minimal 15 hit, atau pernah 5 hit atau lebih dalam sehari. Mereka calon pelanggan berbayar.</p>
+      <div class="tl">${chips('ai-tier', L.tier, [['all', 'Semua paket'], ['free', 'Free'], ['pro', 'Pro'], ['max', 'Max'], ['gift', 'Gratis (hadiah)']])}<span class="sep"></span>${chips('ai-lrange', L.range, [['7', '7 hari'], ['30', '30 hari'], ['90', '90 hari'], ['all', 'Semua']])}</div>
+      <div class="searchrow" style="margin-bottom:10px"><input id="aiq" placeholder="cari email" value="${esc(L.q || '')}"><select data-act="ai-sort">${SORTS.map(([v, t]) => `<option value="${v}" ${L.sort === v ? 'selected' : ''}>${t}</option>`).join('')}</select><button class="btn" data-act="ai-lsearch">Cari</button><button class="btn sec" data-act="unmask">${unmask ? 'Sembunyikan email' : 'Tampilkan email'}</button><button class="btn sec" data-act="ai-csv">Unduh CSV</button></div>
+      <div class="tablewrap"><table><tr><th>Akun</th><th>Paket</th><th>Daftar</th><th class="n">Hit</th><th class="n">Biaya</th><th class="n">Biaya/hit</th><th class="n">Hari aktif</th><th class="n">Maks/hari</th><th>Terakhir</th><th class="n">Porsi biaya</th><th></th></tr>${body || '<tr><td colspan="11" class="hint">Tidak ada akun yang cocok.</td></tr>'}</table></div>
+      <div class="searchrow" style="margin-top:10px;align-items:center"><span class="hint">${num(total)} akun · halaman ${L.page + 1} dari ${pages}</span><span style="flex:1"></span><button class="btn sec sm" data-act="ai-page" data-d="-1" ${L.page <= 0 ? 'disabled' : ''}>Sebelumnya</button><button class="btn sec sm" data-act="ai-page" data-d="1" ${L.page + 1 >= pages ? 'disabled' : ''}>Berikutnya</button></div></div>`;
+  }
+  async function aiCsv() {
+    const L = aip.list;
+    try {
+      const rows = await rpc('admin_ai_users', { p_from: rangeFrom(L.range), p_to: null, p_tier: L.tier, p_q: L.q || null, p_sort: L.sort, p_limit: 2000, p_offset: 0, p_function: aip.fn || null });
+      const head = ['email', 'paket', 'gratis', 'uji_sistem', 'potensial', 'daftar', 'hit', 'biaya_idr', 'biaya_per_hit_idr', 'hari_aktif', 'maks_hit_sehari', 'terakhir_pakai', 'porsi_biaya_persen'];
+      const q = (v) => '"' + String(v ?? '').replace(/"/g, '""') + '"';
+      const lines = rows.map((r) => [r.account_key, r.subscription_type, r.is_gift ? 'ya' : '', r.is_system ? 'ya' : '', isPotential(r) ? 'ya' : '', String(r.registered_at || '').slice(0, 10), r.calls, Math.round(r.cost_idr), Math.round(r.avg_cost_idr), r.active_days, r.max_day_calls, r.last_call || '', (Number(r.share_cost) * 100).toFixed(2)].map(q).join(','));
+      const blob = new Blob([[head.map(q).join(','), ...lines].join('\n')], { type: 'text/csv;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = 'pengguna-ai.csv'; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      toast(`${rows.length} akun diunduh.`);
+    } catch (e) { fail(e); }
   }
 
   // ------------------------------------------------------------------ Pengumuman
@@ -596,20 +759,23 @@
       tier: () => tierModal(el.dataset.email, el.dataset.type), 'tier-save': () => tierSave(el.dataset.email),
       'cost-days': () => { cost.days = +el.dataset.v; route(); }, 'cost-own': () => { cost.hideOwn = !cost.hideOwn; route(); },
       'quota-one': quotaOne, 'quota-all': quotaAllModal, 'quota-all-do': quotaAllDo,
-      'rel-save': relSave, 'ledger-add': () => ledgerAdd(el.dataset.kind), 'ledger-del': () => ledgerDel(el.dataset.id), 'sg-type': () => { sg[el.dataset.c].type = el.dataset.v; sgSave(); route(); }, 'sg-range': () => { sg[el.dataset.c].range = el.dataset.v; sgSave(); route(); }, 'sg-metric': () => { sg[el.dataset.c].metric = el.dataset.v; sgSave(); route(); }, 'set-save': () => setSave(el.dataset.key), 'sum-days': () => { sumDays = +el.dataset.v; route(); }, flag: () => flagToggle(el), 'param-save': () => paramSave(el.dataset.key),
+      'ai-tab': () => { aip.tab = el.dataset.v; sgSave(); route(); }, 'ai-metric': () => { aip.metric = el.dataset.v; sgSave(); route(); }, 'ai-usearch': () => { aip.uq = ($('#aiq').value || '').trim(); sgSave(); route(); }, 'ai-pick': () => { aip.account = el.dataset.email; aip.tab = 'user'; aip.uq = ''; sgSave(); route(); }, 'ai-clear': () => { aip.account = ''; sgSave(); route(); }, 'ai-tier': () => { aip.list.tier = el.dataset.v; aip.list.page = 0; sgSave(); route(); }, 'ai-lrange': () => { aip.list.range = el.dataset.v; aip.list.page = 0; sgSave(); route(); }, 'ai-lsearch': () => { aip.list.q = ($('#aiq').value || '').trim(); aip.list.page = 0; sgSave(); route(); }, 'ai-page': () => { aip.list.page = Math.max(0, aip.list.page + Number(el.dataset.d)); sgSave(); route(); }, 'ai-csv': aiCsv, 'rel-save': relSave, 'ledger-add': () => ledgerAdd(el.dataset.kind), 'ledger-del': () => ledgerDel(el.dataset.id), 'sg-type': () => { prefOf(el.dataset.c).type = el.dataset.v; sgSave(); route(); }, 'sg-range': () => { prefOf(el.dataset.c).range = el.dataset.v; sgSave(); route(); }, 'sg-metric': () => { prefOf(el.dataset.c).metric = el.dataset.v; sgSave(); route(); }, 'set-save': () => setSave(el.dataset.key), 'sum-days': () => { sumDays = +el.dataset.v; route(); }, flag: () => flagToggle(el), 'param-save': () => paramSave(el.dataset.key),
     }[act];
     if (go) go();
   });
   document.addEventListener('change', (ev) => {
     if (ev.target.matches('[data-act=cost-fn]')) { cost.fn = ev.target.value; route(); }
-    if (ev.target.matches('[data-act=sg-day]')) { sg.series.day = ev.target.value; sgSave(); route(); }
-    if (ev.target.matches('[data-act=sg-dow]')) { sg.hour.dow = ev.target.value; sgSave(); route(); }
+    if (ev.target.matches('[data-act=ai-fn]')) { aip.fn = ev.target.value; aip.list.page = 0; sgSave(); route(); }
+    if (ev.target.matches('[data-act=ai-sort]')) { aip.list.sort = ev.target.value; aip.list.page = 0; sgSave(); route(); }
+    if (ev.target.matches('[data-act=sg-day]')) { prefOf(ev.target.dataset.c || 'series').day = ev.target.value; sgSave(); route(); }
+    if (ev.target.matches('[data-act=sg-dow]')) { prefOf(ev.target.dataset.c || 'hour').dow = ev.target.value; sgSave(); route(); }
     if (ev.target.name === 'audience') {
       const push = $('#sendpush'); if (push) { push.disabled = ev.target.value !== 'all'; if (push.disabled) push.checked = false; }
     }
   });
   document.addEventListener('submit', (ev) => { if (ev.target.id === 'annform') { ev.preventDefault(); annSubmit(ev.target); } });
   document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' && ev.target.id === 'aiq') { const b = $('[data-act=ai-usearch]') || $('[data-act=ai-lsearch]'); if (b) b.click(); }
     if (ev.key === 'Enter' && ev.target.id === 'uq') { userQuery = ev.target.value.trim(); route(); }
     if (ev.key === 'Enter' && ev.target.id === 'mfacode') { const b = $('[data-act=mfa-verify]'); if (b) b.click(); }
     if (ev.key === 'Escape') closeModal();
