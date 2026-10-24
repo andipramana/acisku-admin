@@ -121,9 +121,11 @@
   // ------------------------------------------------------------------ app shell and routing
   const PAGES = [
     ['ringkasan', '📊', 'Ringkasan', pgRingkasan],
+    ['pendaftar', '👥', 'Pendaftar', pgPendaftar],
     ['pengumuman', '📢', 'Pengumuman', pgPengumuman],
     ['pengguna', '👤', 'Pengguna', pgPengguna],
     ['biaya', '💸', 'Biaya AI', pgBiaya],
+    ['keuangan', '💰', 'Keuangan', pgKeuangan],
     ['kuota', '⏱️', 'Kuota AI', pgKuota],
     ['rilis', '🚀', 'Rilis & pengaturan', pgRilis],
   ];
@@ -158,16 +160,25 @@
   // A chart: every bar has its number, and tapping a bar shows that day in full underneath.
   const charts = {};
   const longDay = (d) => new Date(d + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long' });
-  function chart(id, items, fmt, detail) {
+  function chart(id, items, fmt, detail, opt) {
+    opt = opt || {};
     charts[id] = { items, detail };
     const n = items.length, max = Math.max(1, ...items.map((i) => i.v));
-    const every = n <= 16 ? 1 : n <= 31 ? 2 : 6;
-    const bars = items.map((it, i) => {
-      const show = (n - 1 - i) % every === 0;
-      return `<button type="button" class="bar${i === n - 1 ? ' now sel' : ''}" data-i="${i}" style="height:${Math.max(4, (it.v / max) * 100)}%" aria-label="${esc(longDay(it.d))}: ${esc(fmt(it.v))}"><b>${show ? esc(fmt(it.v)) : ''}</b></button>`;
-    }).join('');
-    const axis = items.map((it, i) => `<span>${(n - 1 - i) % every === 0 ? esc(dayLabel(it.d)) : ''}</span>`).join('');
-    return `<div class="chartbox" data-chart="${id}"><div class="bars">${bars}</div><div class="axis">${axis}</div><div class="cdetail">${detail(items, n - 1)}</div></div>`;
+    const axisEvery = Math.max(1, Math.ceil(n / 12));
+    const showVal = (it, i) => (n <= 16 ? true : it.v === max) && it.v > 0 || (n <= 16 && it.v === 0);
+    const axis = items.map((it, i) => `<span>${(n - 1 - i) % axisEvery === 0 ? esc(it.lab) : ''}</span>`).join('');
+    const last = opt.sel == null ? n - 1 : opt.sel;
+    let body;
+    if (opt.type === 'line') {
+      const x = (i) => (n === 1 ? 50 : ((i + 0.5) / n) * 100);
+      const y = (v) => 100 - (v / max) * 100;
+      const pts = items.map((it, i) => `${x(i).toFixed(2)},${y(it.v).toFixed(2)}`).join(' ');
+      const dots = items.map((it, i) => `<button type="button" class="bar dot${i === last ? ' sel' : ''}" data-i="${i}" style="left:${x(i)}%;bottom:${(it.v / max) * 100}%" aria-label="${esc(it.aria || it.lab)}: ${esc(fmt(it.v))}"><b>${showVal(it, i) ? esc(fmt(it.v)) : ''}</b></button>`).join('');
+      body = `<div class="linebox"><svg class="lsvg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polyline points="${pts}" fill="none" stroke="var(--barnow)" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"/></svg>${dots}</div>`;
+    } else {
+      body = `<div class="bars">${items.map((it, i) => `<button type="button" class="bar${i === n - 1 && !opt.noNow ? ' now' : ''}${i === last ? ' sel' : ''}" data-i="${i}" style="height:${Math.max(4, (it.v / max) * 100)}%" aria-label="${esc(it.aria || it.lab)}: ${esc(fmt(it.v))}"><b>${showVal(it, i) ? esc(fmt(it.v)) : ''}</b></button>`).join('')}</div>`;
+    }
+    return `<div class="chartbox" data-chart="${id}">${body}<div class="axis">${axis}</div><div class="cdetail">${detail(items, last)}</div></div>`;
   }
   function pickBar(bar) {
     const box = bar.closest('.chartbox'), c = charts[box.dataset.chart];
@@ -186,24 +197,35 @@
   // ------------------------------------------------------------------ Ringkasan
   let sumDays = 14;
   async function pgRingkasan() {
-    const [o, su, co, pf] = await Promise.all([rpc('admin_overview'), rpc('admin_signups_per_day', { p_days: sumDays }), rpc('admin_ai_cost_per_day', { p_days: sumDays }), rpc('admin_profit_estimate', { p_days: 30 })]);
+    const [o, su, co, pf, sets] = await Promise.all([rpc('admin_overview'), rpc('admin_signups_per_day', { p_days: sumDays }), rpc('admin_ai_cost_per_day', { p_days: sumDays }), rpc('admin_profit_estimate', { p_days: 30 }), rpc('admin_get_settings')]);
     const y = Number(o.ai_cost_idr_yesterday || 0), t = Number(o.ai_cost_idr_today || 0);
     const delta = y > 0 ? Math.round(((t - y) / y) * 100) : null;
     const rel = o.release || {};
     const rangeChips = [14, 30, 90].map((d) => `<button data-act="sum-days" data-v="${d}" class="${sumDays === d ? 'on' : ''}">${d} hari</button>`).join('');
-    const kindName = { 'bulan pertama': 'bulan pertama (harga diskon pelanggan baru)', bulanan: 'perpanjangan bulanan', tahunan: 'tahunan' };
-    const lines = (pf.lines || []).map((l) => `<tr><td>${esc(l.plan === 'max' ? 'Max' : 'Pro')} · ${esc(kindName[l.kind] || l.kind)} × ${num(l.n)}</td><td class="n">${rp(l.sum)}</td></tr>`).join('');
+    const setv = Object.fromEntries((sets || []).map((x) => [x.key, Number(x.value)]));
+    const lineN = (plan, kind) => ((pf.lines || []).find((l) => l.plan === plan && l.kind === kind) || { n: 0 }).n;
+    const calcRows = [];
+    for (const plan of ['max', 'pro']) {
+      const P = plan === 'max' ? 'Max' : 'Pro';
+      for (const [kind, key, label] of [['bulan pertama', 'intro_', 'harga diskon (pelanggan baru)'], ['bulanan', 'price_', 'harga normal (perpanjangan)']]) {
+        const n = Number(lineN(plan, kind)), unit = setv[key + plan] || 0;
+        calcRows.push(`<tr><td>${P} · ${label}</td><td class="n">${rp(unit)} × ${num(n)} = <b>${rp(unit * n)}</b></td></tr>`);
+      }
+      const yn = Number(lineN(plan, 'tahunan'));
+      if (yn) calcRows.push(`<tr><td>${P} · tahunan</td><td class="n">${rp(setv['yearly_' + plan] || 0)} × ${num(yn)} = <b>${rp((setv['yearly_' + plan] || 0) * yn)}</b></td></tr>`);
+    }
+    const lines = calcRows.join('');
     const profitCard = `<div class="card" style="margin-bottom:14px"><h3>Estimasi keuntungan ${pf.days} hari terakhir</h3>
       <p class="hint">Perkiraan pendapatan langganan dikurangi potongan Google dan biaya AI. Bukan laporan keuangan.</p>
       <div class="grid g2"><div><div class="kpi"><div class="v ${Number(pf.profit) < 0 ? 'down' : 'up'}">${Number(pf.profit) < 0 ? '−' : ''}${rp(Math.abs(pf.profit))}</div><div class="l">Estimasi keuntungan</div></div>
-        <p class="hint" style="margin-top:10px;line-height:1.5">Pembayaran pertama pelanggan baru dihitung dengan harga diskon. Belum termasuk donasi Traktir Matcha (tidak tercatat di server), pajak, dan pengembalian dana. Langganan hadiah tidak dihitung. Harga dan potongan bisa diubah di <a href="#rilis">Rilis dan pengaturan</a>.</p></div>
-        <div class="tablewrap"><table>${lines || '<tr><td class="hint">Belum ada pembayaran langganan di rentang ini.</td><td></td></tr>'}
+        <p class="hint" style="margin-top:10px;line-height:1.5">Rumusnya harga × jumlah pembayaran. Pembayaran pertama pelanggan baru memakai harga diskon. Belum termasuk donasi Traktir Matcha (tidak tercatat di server), pajak, dan pengembalian dana. Langganan hadiah tidak punya pendapatan. Harga dan potongan bisa diubah di <a href="#rilis">Rilis dan pengaturan</a>. Ringkasan sepanjang waktu ada di <a href="#keuangan">Keuangan</a>.</p></div>
+        <div class="tablewrap"><table>${lines}
           <tr><td><b>Pendapatan kotor</b></td><td class="n"><b>${rp(pf.gross)}</b></td></tr>
           <tr><td>− Potongan Google ${num(pf.fee_percent)}%</td><td class="n">${rp(pf.fee)}</td></tr>
           <tr><td><b>Pendapatan bersih</b></td><td class="n"><b>${rp(pf.net)}</b></td></tr>
           <tr><td>− Biaya AI (${num(pf.ai_calls)} permintaan)</td><td class="n">${rp(pf.ai_cost)}</td></tr>
-          ${Number(pf.gift_accounts) ? `<tr><td>${chip('am', 'Gratis')} ${num(pf.gift_accounts)} akun hadiah: biaya AI tidak dihitung</td><td class="n">${rp(pf.gift_ai_cost)}</td></tr>` : ''}</table></div></div></div>`;
-    return `<h1>Ringkasan</h1><p class="sub">Angka utama. Hari dihitung WIB; akun uji tidak ikut biaya AI.</p>
+          ${Number(pf.gift_accounts) ? `<tr><td class="hint">${chip('am', 'Gratis')} ${num(pf.gift_accounts)} akun hadiah: pendapatan Rp0, biaya AI-nya (${rp(pf.gift_ai_cost)}) tetap ikut dihitung di atas</td><td></td></tr>` : ''}</table></div></div></div>`;
+    return `<h1>Ringkasan</h1><p class="sub">Angka utama. Hari dihitung WIB. Biaya AI menghitung semua akun, termasuk akun uji dan sistem.</p>
       ${profitCard}
       <div class="grid g4" style="margin-bottom:14px">
         <div class="card kpi"><div class="v">${num(o.signups_total)}</div><div class="l">Pendaftar total</div><div class="d up">+${num(o.signups_today)} hari ini</div></div>
@@ -213,13 +235,92 @@
       </div>
       <div class="tl">${rangeChips}</div>
       <div class="grid g2">
-        <div class="card"><h3>Pendaftar per hari</h3><p class="hint">Ketuk batang untuk rinciannya</p>${chart('su', su.map((r) => ({ d: String(r.day).slice(0, 10), v: Number(r.n) })), (v) => num(v), (it, i) => `<b>${esc(longDay(it[i].d))}</b>: ${num(it[i].v)} pendaftar${deltaText(it, i, num)}`)}</div>
-        <div class="card"><h3>Biaya AI per hari</h3><p class="hint">Ketuk batang untuk rinciannya</p>${chart('co', co.map((r) => ({ d: String(r.day).slice(0, 10), v: Number(r.cost_idr), req: Number(r.requests) })), (v) => (v >= 1000 ? (v / 1000).toFixed(1) + 'rb' : String(Math.round(v))), (it, i) => `<b>${esc(longDay(it[i].d))}</b>: ${rp(it[i].v)} · ${num(it[i].req)} permintaan${deltaText(it, i, rp)}`)}</div>
+        <div class="card"><h3>Pendaftar per hari</h3><p class="hint">Ketuk batang untuk rinciannya</p>${chart('su', su.map((r) => ({ d: String(r.day).slice(0, 10), lab: dayLabel(r.day), aria: longDay(String(r.day).slice(0, 10)), v: Number(r.n) })), (v) => num(v), (it, i) => `<b>${esc(longDay(it[i].d))}</b>: ${num(it[i].v)} pendaftar${deltaText(it, i, num)}`)}</div>
+        <div class="card"><h3>Biaya AI per hari</h3><p class="hint">Ketuk batang untuk rinciannya</p>${chart('co', co.map((r) => ({ d: String(r.day).slice(0, 10), lab: dayLabel(r.day), aria: longDay(String(r.day).slice(0, 10)), v: Number(r.cost_idr), req: Number(r.requests) })), (v) => (v >= 1000 ? (v / 1000).toFixed(1) + 'rb' : String(Math.round(v))), (it, i) => `<b>${esc(longDay(it[i].d))}</b>: ${rp(it[i].v)} · ${num(it[i].req)} permintaan${deltaText(it, i, rp)}`)}</div>
       </div>
       <div class="card" style="margin-top:14px"><h3>Yang sedang aktif</h3><div class="tablewrap"><table>
         <tr><td>Pengumuman berlangsung</td><td>${Number(o.announcements_active) ? chip('red', o.announcements_active + ' aktif') : chip('gr', 'tidak ada')}</td><td class="n"><a href="#pengumuman">Buka</a></td></tr>
         <tr><td>Versi terbaru / minimum</td><td>${chip('gr', (rel.latest_version || '?') + (rel.latest_build ? '+' + rel.latest_build : '') + ' / ' + (rel.minimum_required_version || '?'))}</td><td class="n"><a href="#rilis">Buka</a></td></tr>
         <tr><td>Fitur menyala</td><td>${(o.flags_on || []).map((f) => chip('mu', f)).join(' ')}</td><td class="n"><a href="#rilis">Buka</a></td></tr></table></div></div>`;
+  }
+
+
+  // ------------------------------------------------------------------ Pendaftar
+  const SG_KEY = 'admin-signup-prefs';
+  const SG_DEFAULT = {
+    series: { type: 'bar', range: '14', day: '' },
+    weekday: { type: 'bar', range: 'all', metric: 'total' },
+    hour: { type: 'bar', range: 'all', metric: 'total', dow: '' },
+  };
+  let sg = (() => {
+    try { const v = JSON.parse(localStorage.getItem(SG_KEY) || 'null'); if (v && v.series && v.weekday && v.hour) return v; } catch (e) { /* none saved */ }
+    return JSON.parse(JSON.stringify(SG_DEFAULT));
+  })();
+  const sgSave = () => { try { localStorage.setItem(SG_KEY, JSON.stringify(sg)); } catch (e) { /* private window */ } };
+  const todayWib = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' });
+  const addDays = (d, n) => { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
+  const rangeFrom = (r) => (r === 'all' ? null : addDays(todayWib(), -(Number(r) - 1)));
+  const DOW_SHORT = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
+  const DOW_LONG = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
+  const avgFmt = (v) => Number(v).toLocaleString('id-ID', { maximumFractionDigits: 1 });
+
+  function sgControls(c, prefs, ranges, opts) {
+    const chips = (act, cur, list) => list.map(([v, t]) => `<button data-act="${act}" data-c="${c}" data-v="${v}" class="${String(cur) === String(v) ? 'on' : ''}">${t}</button>`).join('');
+    return `<div class="tl" style="margin-bottom:8px">${chips('sg-type', prefs.type, [['bar', 'Batang'], ['line', 'Garis']])}<span class="sep"></span>${chips('sg-range', prefs.range, ranges)}${opts && opts.metric ? '<span class="sep"></span>' + chips('sg-metric', prefs.metric, [['total', 'Jumlah'], ['avg', 'Rata-rata per hari']]) : ''}</div>`;
+  }
+
+  async function pgPendaftar() {
+    const today = todayWib();
+    const oneDay = sg.series.range === 'day';
+    const day = sg.series.day || today;
+    const sFrom = oneDay ? day : rangeFrom(sg.series.range);
+    const [ser, wd, hr] = await Promise.all([
+      rpc('admin_signups_series', { p_from: sFrom, p_to: oneDay ? day : null, p_bucket: oneDay ? 'hour' : 'day' }),
+      rpc('admin_signups_by_weekday', { p_from: rangeFrom(sg.weekday.range), p_to: null }),
+      rpc('admin_signups_by_hour', { p_from: rangeFrom(sg.hour.range), p_to: null, p_dow: sg.hour.dow ? Number(sg.hour.dow) : null }),
+    ]);
+
+    // 1. per day, or per hour of one day
+    const sItems = ser.map((r) => oneDay
+      ? { lab: r.label, aria: 'Jam ' + r.label, v: Number(r.n), hour: r.label }
+      : { lab: dayLabel(r.label), aria: longDay(r.label), v: Number(r.n), d: r.label });
+    const sTotal = sItems.reduce((a, i) => a + i.v, 0);
+    const sDetail = (it, i) => oneDay
+      ? `<b>Jam ${esc(it[i].hour)}.00–${esc(it[i].hour)}.59</b>: ${num(it[i].v)} pendaftar${i > 0 ? ' · ' + (it[i].v - it[i - 1].v >= 0 ? '+' : '−') + num(Math.abs(it[i].v - it[i - 1].v)) + ' dari jam sebelumnya' : ''}`
+      : `<b>${esc(longDay(it[i].d))}</b>: ${num(it[i].v)} pendaftar${deltaText(it, i, num)}`;
+    const sRanges = [['day', 'Sehari (per jam)'], ['7', '7 hari'], ['14', '14 hari'], ['30', '30 hari'], ['all', 'Semua']];
+    const dayPicker = oneDay ? `<div class="field" style="max-width:220px"><label>Tanggal</label><input type="date" data-act="sg-day" value="${esc(day)}" max="${esc(today)}"></div>` : '';
+    const sPeak = sItems.reduce((m, i) => (i.v > m.v ? i : m), sItems[0] || { v: 0, lab: '' });
+
+    // 2. by weekday
+    const wMetric = sg.weekday.metric;
+    const wItems = wd.map((r) => ({ lab: DOW_SHORT[r.dow - 1], aria: DOW_LONG[r.dow - 1], v: wMetric === 'avg' ? (r.days ? Number(r.n) / r.days : 0) : Number(r.n), n: Number(r.n), days: r.days, name: DOW_LONG[r.dow - 1] }));
+    const wTop = wItems.reduce((m, i) => (i.v > m.v ? i : m), wItems[0]);
+    const wDetail = (it, i) => `<b>${esc(it[i].name)}</b>: ${num(it[i].n)} pendaftar dari ${num(it[i].days)} hari ${esc(it[i].name)} · rata-rata ${avgFmt(it[i].days ? it[i].n / it[i].days : 0)} per hari`;
+
+    // 3. by hour
+    const hMetric = sg.hour.metric;
+    const hItems = hr.map((r) => ({ lab: String(r.hour).padStart(2, '0'), aria: 'Jam ' + String(r.hour).padStart(2, '0'), v: hMetric === 'avg' ? (r.days ? Number(r.n) / r.days : 0) : Number(r.n), n: Number(r.n), days: r.days, hour: String(r.hour).padStart(2, '0') }));
+    const hTop = hItems.reduce((m, i) => (i.v > m.v ? i : m), hItems[0]);
+    const hDetail = (it, i) => `<b>Jam ${esc(it[i].hour)}.00–${esc(it[i].hour)}.59</b>: ${num(it[i].n)} pendaftar${it[i].days ? ` dari ${num(it[i].days)} hari · rata-rata ${avgFmt(it[i].n / it[i].days)} per hari` : ''}`;
+    const hRanges = [['7', '7 hari'], ['14', '14 hari'], ['30', '30 hari'], ['90', '90 hari'], ['all', 'Semua']];
+    const wRanges = [['14', '14 hari'], ['30', '30 hari'], ['90', '90 hari'], ['all', 'Semua']];
+    const fmtVal = (metric) => (metric === 'avg' ? avgFmt : (v) => num(v));
+
+    return `<h1>Pendaftar</h1><p class="sub">Kapan orang mendaftar. Hari dan jam dihitung WIB. Ketuk batang atau titik untuk rinciannya; pengaturan tersimpan di browser ini.</p>
+      <div class="card" style="margin-bottom:14px"><h3>Pendaftar ${oneDay ? 'per jam' : 'per hari'}</h3>
+        <p class="hint">${oneDay ? 'Jam demi jam pada satu hari' : 'Satu batang per hari'} · total ${num(sTotal)}${sItems.length && sPeak.v ? ` · tertinggi ${esc(oneDay ? 'jam ' + sPeak.lab : longDay(sPeak.d))} (${num(sPeak.v)})` : ''}</p>
+        ${sgControls('series', sg.series, sRanges)}${dayPicker}
+        ${chart('sgS', sItems, (v) => num(v), sDetail, { type: sg.series.type, noNow: oneDay })}</div>
+      <div class="grid g2">
+        <div class="card"><h3>Menurut hari dalam seminggu</h3><p class="hint">Semua tanggal digabung${wTop && wTop.v ? ` · paling ramai ${esc(wTop.name)}` : ''}</p>
+          ${sgControls('weekday', sg.weekday, wRanges, { metric: true })}
+          ${chart('sgW', wItems, fmtVal(wMetric), wDetail, { type: sg.weekday.type, sel: wItems.indexOf(wTop), noNow: true })}</div>
+        <div class="card"><h3>Menurut jam</h3><p class="hint">Semua tanggal digabung, jam 00 sampai 23${hTop && hTop.v ? ` · paling ramai jam ${esc(hTop.hour)}.00` : ''}</p>
+          ${sgControls('hour', sg.hour, hRanges, { metric: true })}
+          <div class="field" style="max-width:220px;margin:0 0 8px"><label>Hanya hari</label><select data-act="sg-dow"><option value="">Semua hari</option>${DOW_LONG.map((n, i) => `<option value="${i + 1}" ${String(sg.hour.dow) === String(i + 1) ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+          ${chart('sgH', hItems, fmtVal(hMetric), hDetail, { type: sg.hour.type, sel: hItems.indexOf(hTop), noNow: true })}</div>
+      </div>`;
   }
 
   // ------------------------------------------------------------------ Pengumuman
@@ -336,7 +437,7 @@
     ]);
     const chips = [[1, 'Hari ini'], [7, '7 hari'], [30, '30 hari'], [90, '90 hari']].map(([d, t]) => `<button data-act="cost-days" data-v="${d}" class="${cost.days === d ? 'on' : ''}">${t}</button>`).join('');
     const total = perDay.reduce((s, r) => s + Number(r.cost_idr), 0), reqs = perDay.reduce((s, r) => s + Number(r.requests), 0);
-    return `<h1>Biaya AI</h1><p class="sub">Dari tabel panggilan AI. Akun uji tidak ikut dihitung. Kurs Rp17.900 per USD.</p>
+    return `<h1>Biaya AI</h1><p class="sub">Dari tabel panggilan AI. Semua akun dihitung, termasuk akun uji dan sistem. Kurs Rp17.900 per USD.</p>
       <div class="tl">${chips}<span style="flex:1"></span>
         <select data-act="cost-fn"><option value="">Semua fitur</option>${['ai-chat', 'receipt-analyze', 'quick-add', 'scan', 'business-sale-parse'].map((f) => `<option ${cost.fn === f ? 'selected' : ''}>${f}</option>`).join('')}</select>
         <button data-act="cost-own" class="${cost.hideOwn ? 'on' : ''}">Sembunyikan akun saya</button><button data-act="unmask" class="${unmask ? 'on' : ''}">Email penuh</button></div>
@@ -345,8 +446,73 @@
         <div class="card"><h3>Per hari</h3><div class="tablewrap"><table><tr><th>Tanggal</th><th class="n">Permintaan</th><th class="n">USD</th><th class="n">Rupiah</th></tr>${[...perDay].reverse().slice(0, 31).map((r) => `<tr><td>${esc(String(r.day).slice(5))}</td><td class="n">${num(r.requests)}</td><td class="n">${usd(r.cost_usd)}</td><td class="n">${rp(r.cost_idr)}</td></tr>`).join('')}</table></div></div>
         <div class="card"><h3>Per akun</h3><p class="hint">${cost.days === 1 ? 'Hari ini' : cost.days + ' hari terakhir'} (hari ini WIB tidak dipisah)</p><div class="tablewrap"><table><tr><th>Akun</th><th class="n">Panggilan</th><th class="n">Rata-rata USD</th><th class="n">Rupiah</th></tr>${perAcc.slice(0, 25).map((r) => `<tr><td class="mono">${who(r.account_key)}</td><td class="n">${num(r.calls)}</td><td class="n">${usd(r.avg_usd)}</td><td class="n">${rp(r.cost_idr)}</td></tr>`).join('') || '<tr><td colspan="4" class="hint">Kosong.</td></tr>'}</table></div></div>
       </div>
-      <div class="card" style="margin-top:14px"><h3>Untung per akun</h3><p class="hint">${cost.days === 1 ? 'Hari ini' : cost.days + ' hari terakhir'}. Pendapatan bersih adalah perkiraan setelah potongan Google. Akun hadiah (gratis) tidak punya pendapatan, jadi untungnya dihitung Rp0 dan diberi tanda.</p><div class="tablewrap"><table><tr><th>Akun</th><th>Paket</th><th class="n">Biaya AI</th><th class="n">Pendapatan bersih</th><th class="n">Untung</th></tr>${accProfit.slice(0, 30).map((r) => `<tr><td class="mono">${who(r.account_key)}${r.is_gift ? ' ' + chip('am', 'Gratis') : ''}</td><td>${tierChip(r.subscription_type)}</td><td class="n">${rp(r.cost_idr)}</td><td class="n">${r.is_gift ? '—' : rp(r.net_idr)}</td><td class="n ${r.is_gift ? '' : Number(r.profit_idr) < 0 ? 'down' : 'up'}">${r.is_gift ? 'Rp0' : (Number(r.profit_idr) < 0 ? '−' : '') + rp(Math.abs(r.profit_idr))}</td></tr>`).join('') || '<tr><td colspan="5" class="hint">Kosong.</td></tr>'}</table></div></div>
+      <div class="card" style="margin-top:14px"><h3>Untung per akun</h3><p class="hint">${cost.days === 1 ? 'Hari ini' : cost.days + ' hari terakhir'}. Pendapatan bersih adalah perkiraan setelah potongan Google. Akun hadiah (gratis) tidak punya pendapatan, jadi untungnya Rp0 dan diberi tanda; biayanya tetap dihitung di total.</p><div class="tablewrap"><table><tr><th>Akun</th><th>Paket</th><th class="n">Biaya AI</th><th class="n">Pendapatan bersih</th><th class="n">Untung</th></tr>${accProfit.slice(0, 30).map((r) => `<tr><td class="mono">${who(r.account_key)}${r.is_gift ? ' ' + chip('am', 'Gratis') : ''}${r.is_system ? ' ' + chip('mu', 'Uji/sistem') : ''}</td><td>${tierChip(r.subscription_type)}</td><td class="n">${rp(r.cost_idr)}</td><td class="n">${r.is_gift ? '—' : rp(r.net_idr)}</td><td class="n ${r.is_gift ? '' : Number(r.profit_idr) < 0 ? 'down' : 'up'}">${r.is_gift ? 'Rp0' : (Number(r.profit_idr) < 0 ? '−' : '') + rp(Math.abs(r.profit_idr))}</td></tr>`).join('') || '<tr><td colspan="5" class="hint">Kosong.</td></tr>'}</table></div></div>
       <div class="card" style="margin-top:14px"><h3>Panggilan mahal</h3><p class="hint">Biaya ≥ Rp20 per panggilan, 30 terbaru</p><div class="tablewrap"><table><tr><th>Waktu</th><th>Akun</th><th>Fungsi</th><th class="n">Cache</th><th class="n">Rupiah</th></tr>${exp.map((r) => `<tr><td>${when(r.created_at)}</td><td class="mono">${who(r.account_key)}</td><td>${esc(r.edge_function)}</td><td class="n">${r.cache_hit_ratio == null ? '—' : Math.round(r.cache_hit_ratio * 100) + '%'}</td><td class="n">${rp(r.cost_idr)}</td></tr>`).join('') || '<tr><td colspan="5" class="hint">Tidak ada.</td></tr>'}</table></div></div>`;
+  }
+
+
+  // ------------------------------------------------------------------ Keuangan
+  async function aiBalance() {
+    try {
+      const { data: s2 } = await sb.auth.getSession();
+      const res = await fetch(cfg.url + '/functions/v1/admin-ai-balance', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + s2.session.access_token, apikey: cfg.anonKey, 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      const j = await res.json().catch(() => ({}));
+      return res.ok ? j : { error: j.error || String(res.status) };
+    } catch (e) { return { error: e.message || String(e) }; }
+  }
+  const ledgerRows = (list) => list.map((l) => `<tr><td>${esc(String(l.at))}<br><span class="hint">${esc(l.note || '')}</span></td><td class="n">${rp(l.amount_idr)}</td><td class="n"><button class="btn sm sec" data-act="ledger-del" data-id="${l.id}">Hapus</button></td></tr>`).join('') || '<tr><td colspan="3" class="hint">Belum ada catatan.</td></tr>';
+  const ledgerForm = (kind, title, hint) => `<div class="card"><h3>${title}</h3><p class="hint">${hint}</p>
+    <div class="row2"><div class="field"><label>Tanggal</label><input type="date" id="ld-${kind}" value="${esc(todayWib())}" max="${esc(todayWib())}"></div><div class="field"><label>Jumlah (Rp)</label><input id="la-${kind}" inputmode="numeric" placeholder="mis. 100000"></div></div>
+    <div class="field"><label>Catatan (opsional)</label><input id="ln-${kind}" maxlength="120"></div>
+    <button class="btn" data-act="ledger-add" data-kind="${kind}">Catat</button></div>`;
+
+  async function pgKeuangan() {
+    const [f, led, bal] = await Promise.all([rpc('admin_finance_summary'), rpc('admin_ledger_list'), aiBalance()]);
+    const wd = led.filter((l) => l.kind === 'withdrawal'), tp = led.filter((l) => l.kind === 'ai_topup');
+    const since = f.since ? new Date(f.since + 'T00:00:00').toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) : '—';
+    const balCard = bal.error
+      ? `<p class="hint">Saldo belum bisa diambil: ${esc(bal.error)}</p>`
+      : (bal.balances || []).map((b) => `<div class="kpi"><div class="v">${esc(b.currency)} ${esc(b.total)}</div><div class="l">isi ulang ${esc(b.topped_up)} · bonus ${esc(b.granted)}${b.currency === 'USD' ? ' · sekitar ' + rp(Number(b.total) * 17900) : ''}</div></div>`).join('') + (bal.is_available ? '' : '<p class="warn">DeepSeek menyatakan saldo tidak cukup untuk memanggil API.</p>');
+    const profitNeg = Number(f.profit) < 0;
+    return `<h1>Keuangan</h1><p class="sub">Ringkasan sejak ${esc(since)} dan catatan uang masuk keluar yang kamu isi sendiri. Pendapatan adalah perkiraan dari langganan Play.</p>
+      <div class="grid g2" style="margin-bottom:14px">
+        <div class="card"><h3>Saldo DeepSeek sekarang</h3><p class="hint">Diambil langsung dari DeepSeek lewat server, kunci tidak keluar dari server.</p>${balCard}<button class="btn sec sm" data-act="reload" style="margin-top:10px">Muat ulang</button></div>
+        <div class="card"><h3>Modal AI</h3><div class="tablewrap"><table>
+          <tr><td>Total modal AI yang kamu tambahkan</td><td class="n"><b>${rp(f.ai_topups)}</b></td></tr>
+          <tr><td>Biaya AI terpakai sejak ${esc(since)} (semua akun)</td><td class="n">${rp(f.ai_cost)}</td></tr>
+          <tr><td class="hint">Selisih ini hanya pembanding kasar: biaya dihitung dari catatan panggilan, saldo asli ada di kiri.</td><td class="n">${rp(Number(f.ai_topups) - Number(f.ai_cost))}</td></tr></table></div></div>
+      </div>
+      <div class="card" style="margin-bottom:14px"><h3>Ringkasan sepanjang waktu</h3><div class="tablewrap"><table>
+        <tr><td>Pendapatan kotor (perkiraan)</td><td class="n">${rp(f.gross)}</td></tr>
+        <tr><td>− Potongan Google ${num(f.fee_percent)}%</td><td class="n">${rp(f.fee)}</td></tr>
+        <tr><td><b>Pendapatan bersih</b></td><td class="n"><b>${rp(f.net)}</b></td></tr>
+        <tr><td>− Biaya AI semua akun</td><td class="n">${rp(f.ai_cost)}</td></tr>
+        <tr><td class="hint">${chip('am', 'Gratis')} termasuk biaya akun hadiah ${rp(f.ai_cost_gift)} (pendapatannya Rp0, biayanya tetap dihitung)</td><td></td></tr>
+        <tr><td><b>Estimasi keuntungan total</b></td><td class="n ${profitNeg ? 'down' : 'up'}"><b>${profitNeg ? '−' : ''}${rp(Math.abs(f.profit))}</b></td></tr>
+        <tr><td>− Keuntungan yang sudah diambil</td><td class="n">${rp(f.withdrawn)}</td></tr>
+        <tr><td><b>Keuntungan yang belum diambil</b></td><td class="n"><b>${Number(f.available) < 0 ? '−' : ''}${rp(Math.abs(f.available))}</b></td></tr></table></div></div>
+      <div class="grid g2">
+        <div>${ledgerForm('withdrawal', 'Keuntungan diambil', 'Catat setiap kali kamu menarik keuntungan.')}
+          <div class="card" style="margin-top:14px"><h3>Riwayat pengambilan</h3><div class="tablewrap"><table>${ledgerRows(wd)}</table></div></div></div>
+        <div>${ledgerForm('ai_topup', 'Tambah modal AI', 'Catat setiap kali kamu mengisi saldo DeepSeek.')}
+          <div class="card" style="margin-top:14px"><h3>Riwayat modal AI</h3><div class="tablewrap"><table>${ledgerRows(tp)}</table></div></div></div>
+      </div>`;
+  }
+  async function ledgerAdd(kind) {
+    const amount = Number(String($('#la-' + kind).value).replace(/[^0-9]/g, ''));
+    if (!amount) return fail('Isi jumlahnya.');
+    try {
+      await rpc('admin_ledger_add', { p_kind: kind, p_at: $('#ld-' + kind).value || null, p_amount: amount, p_note: $('#ln-' + kind).value });
+      toast('Tercatat.'); route();
+    } catch (e) { fail(e); }
+  }
+  async function ledgerDel(id) {
+    if (!confirm('Hapus catatan ini?')) return;
+    try { await rpc('admin_ledger_delete', { p_id: Number(id) }); toast('Dihapus.'); route(); } catch (e) { fail(e); }
   }
 
   // ------------------------------------------------------------------ Kuota AI
@@ -430,12 +596,14 @@
       tier: () => tierModal(el.dataset.email, el.dataset.type), 'tier-save': () => tierSave(el.dataset.email),
       'cost-days': () => { cost.days = +el.dataset.v; route(); }, 'cost-own': () => { cost.hideOwn = !cost.hideOwn; route(); },
       'quota-one': quotaOne, 'quota-all': quotaAllModal, 'quota-all-do': quotaAllDo,
-      'rel-save': relSave, 'set-save': () => setSave(el.dataset.key), 'sum-days': () => { sumDays = +el.dataset.v; route(); }, flag: () => flagToggle(el), 'param-save': () => paramSave(el.dataset.key),
+      'rel-save': relSave, 'ledger-add': () => ledgerAdd(el.dataset.kind), 'ledger-del': () => ledgerDel(el.dataset.id), 'sg-type': () => { sg[el.dataset.c].type = el.dataset.v; sgSave(); route(); }, 'sg-range': () => { sg[el.dataset.c].range = el.dataset.v; sgSave(); route(); }, 'sg-metric': () => { sg[el.dataset.c].metric = el.dataset.v; sgSave(); route(); }, 'set-save': () => setSave(el.dataset.key), 'sum-days': () => { sumDays = +el.dataset.v; route(); }, flag: () => flagToggle(el), 'param-save': () => paramSave(el.dataset.key),
     }[act];
     if (go) go();
   });
   document.addEventListener('change', (ev) => {
     if (ev.target.matches('[data-act=cost-fn]')) { cost.fn = ev.target.value; route(); }
+    if (ev.target.matches('[data-act=sg-day]')) { sg.series.day = ev.target.value; sgSave(); route(); }
+    if (ev.target.matches('[data-act=sg-dow]')) { sg.hour.dow = ev.target.value; sgSave(); route(); }
     if (ev.target.name === 'audience') {
       const push = $('#sendpush'); if (push) { push.disabled = ev.target.value !== 'all'; if (push.disabled) push.checked = false; }
     }
