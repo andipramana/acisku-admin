@@ -128,6 +128,7 @@
     ['pemakaian', '🧾', 'Pemakaian AI', pgPemakaian],
     ['analisis', '🧠', 'Analisis AI', pgAnalisis],
     ['keuangan', '💰', 'Keuangan', pgKeuangan],
+    ['langganan', '⭐', 'Langganan', pgLangganan],
     ['kuota', '⏱️', 'Kuota AI', pgKuota],
     ['rilis', '🚀', 'Rilis & pengaturan', pgRilis],
   ];
@@ -794,6 +795,40 @@
   // ------------------------------------------------------------------ Pemakaian AI (per email: AI and Scan, hits and cost)
   const usage = { days: 1, hideSys: true, metric: 'cost', open: {} };
   const SYS_RE = /demo|test|cache|synth|codex-re|rebecc/i;
+  // one row per Pro / Max account: Play state, auto renew, end date, next charge after Google's fee and the AI cost of 30 days
+  async function pgLangganan() {
+    const rows = await rpc('admin_subscriptions', {});
+    const play = rows.filter((r) => r.source === 'play');
+    const ratio = (() => { const r = play.find((x) => Number(x.next_price) > 0 && Number(x.next_net) > 0); return r ? Number(r.next_net) / Number(r.next_price) : 0.85; })();
+    const live = play.filter((r) => ['ACTIVE', 'IN_GRACE_PERIOD', 'CANCELED'].includes(r.state) && Number(r.days_left) > 0);
+    const renewing = play.filter((r) => r.renews_in_30);
+    const stopping = live.filter((r) => !r.auto_renewing);
+    const in30 = live.filter((r) => Number(r.days_left) <= 30);
+    const net = renewing.reduce((a, r) => a + Number(r.next_net), 0);
+    const netAll = in30.reduce((a, r) => a + Number(r.next_price || 0) * ratio, 0);
+    const cost = rows.reduce((a, r) => a + Number(r.ai_cost_30), 0);
+    const status = (r) => r.source === 'gift' ? chip('am', 'Hadiah')
+      : r.state === 'ACTIVE' && r.auto_renewing ? chip('gr', 'Aktif')
+      : r.state === 'CANCELED' && Number(r.days_left) > 0 ? chip('am', 'Berhenti')
+      : r.state === 'EXPIRED' ? chip('mu', 'Habis')
+      : chip('red', r.state === 'IN_GRACE_PERIOD' ? 'Masa tenggang' : r.state === 'ON_HOLD' ? 'Tertahan' : r.state === 'PAUSED' ? 'Dijeda' : r.state);
+    const ends = (r) => r.source === 'gift' ? '<span class="hint">tidak berakhir</span>'
+      : `${esc(new Date(r.expires_at).toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta', day: 'numeric', month: 'short', year: 'numeric' }))}<br><span class="hint">${Number(r.days_left) > 0 ? 'sisa ' + r.days_left + ' hari' : 'sudah lewat'}</span>`;
+    const renew = (r) => r.source === 'gift' ? '—' : r.auto_renewing ? chip('gr', 'Ya') : chip('am', 'Tidak');
+    const next = (r) => r.renews_in_30 ? rp(r.next_net) : r.source === 'play' && Number(r.days_left) > 0 && Number(r.days_left) <= 30 ? `<span class="hint">Rp0 · kalau perpanjang ${rp(Number(r.next_price || 0) * ratio)}</span>` : '<span class="hint">—</span>';
+    const profit = (r) => { const v = Number(r.est_profit_30); return `<span class="${v < 0 ? 'down' : 'up'}">${v < 0 ? '−' : ''}${rp(Math.abs(v))}</span>`; };
+    const body = rows.map((r) => `<tr><td>${who(r.account_key)}${r.started_at ? `<br><span class="hint">sejak ${esc(new Date(r.started_at).toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta', day: 'numeric', month: 'short', year: 'numeric' }))}</span>` : ''}</td><td>${tierChip(r.plan)}${r.base_plan === 'tahunan' ? ' ' + chip('mu', 'Tahunan') : ''}</td><td>${status(r)}</td><td>${renew(r)}</td><td>${ends(r)}</td><td class="n">${next(r)}</td><td class="n">${rp(r.ai_cost_30)}<br><span class="hint">${Number(r.ai_calls_30).toLocaleString('id-ID')} hit</span></td><td class="n">${profit(r)}</td></tr>`).join('');
+    return `<h1>Langganan</h1><p class="sub">Semua akun Pro dan Max: status dari Google Play, diperpanjang otomatis atau tidak, kapan berakhir, dan perkiraan 30 hari ke depan. Pembelian uji tidak dihitung.</p>
+      <div class="grid g4" style="margin-bottom:14px">
+        <div class="card kpi"><div class="v">${live.length}</div><div class="l">Langganan berbayar aktif</div><div class="d">${stopping.length} berhenti (tidak diperpanjang)</div></div>
+        <div class="card kpi"><div class="v">${renewing.length}</div><div class="l">Diperpanjang dalam 30 hari</div><div class="d">${in30.length} berakhir dalam 30 hari</div></div>
+        <div class="card kpi"><div class="v up">${rp(net)}</div><div class="l">Pendapatan bersih 30 hari</div><div class="d">kalau semua perpanjang ${rp(netAll)}</div></div>
+        <div class="card kpi"><div class="v ${net - cost < 0 ? 'down' : 'up'}">${net - cost < 0 ? '−' : ''}${rp(Math.abs(net - cost))}</div><div class="l">Estimasi untung 30 hari</div><div class="d">biaya AI ${rp(cost)} (pakai 30 hari terakhir)</div></div>
+      </div>
+      <div class="card"><h3>Per akun</h3><div class="tablewrap"><table><tr><th>Email</th><th>Paket</th><th>Status</th><th>Perpanjang otomatis</th><th>Berakhir</th><th class="n">Masuk 30 hari</th><th class="n">Biaya AI 30 hari</th><th class="n">Untung</th></tr>${body || '<tr><td colspan="8" class="hint">Belum ada langganan.</td></tr>'}</table></div>
+      <p class="hint" style="margin-top:10px;line-height:1.5">Masuk 30 hari = harga perpanjangan (harga normal, atau tahunan) setelah potongan Google, hanya untuk yang diperpanjang otomatis dan jatuh tempo dalam 30 hari. Yang "Berhenti" tetap Pro/Max sampai tanggal berakhir, lalu jadi Free. Biaya AI memakai 30 hari terakhir sebagai perkiraan bulan depan. Akun hadiah tidak punya pendapatan. Harga dan potongan diatur di <a href="#rilis">Rilis dan pengaturan</a>.</p></div>`;
+  }
+
   async function pgPemakaian() {
     // tier and labels (Gratis, Potensial, Rajin, Uji/sistem) always from all-time data, not the chosen range
     const [rows, info] = await Promise.all([
