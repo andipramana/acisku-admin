@@ -125,6 +125,7 @@
     ['pengumuman', '📢', 'Pengumuman', pgPengumuman],
     ['pengguna', '👤', 'Pengguna', pgPengguna],
     ['biaya', '💸', 'Biaya AI', pgBiaya],
+    ['pemakaian', '🧾', 'Pemakaian AI', pgPemakaian],
     ['analisis', '🧠', 'Analisis AI', pgAnalisis],
     ['keuangan', '💰', 'Keuangan', pgKeuangan],
     ['kuota', '⏱️', 'Kuota AI', pgKuota],
@@ -790,6 +791,54 @@
     try { await rpc('admin_set_tier', { p_email: email, p_type: $('#tiersel').value }); closeModal(); toast('Paket diubah.'); route(); } catch (e) { fail(e); }
   }
 
+  // ------------------------------------------------------------------ Pemakaian AI (per email: AI and Scan, hits and cost)
+  const usage = { days: 1, hideSys: true, metric: 'cost', open: {} };
+  const SYS_RE = /demo|test|cache|synth|codex-re|rebecc/i;
+  async function pgPemakaian() {
+    const rows = await rpc('admin_ai_usage', { p_days: usage.days });
+    const by = new Map();
+    for (const r of rows) {
+      if (usage.hideSys && SYS_RE.test(r.account_key || '')) continue;
+      const k = r.account_key || '(tanpa akun)';
+      if (!by.has(k)) by.set(k, { k, aiN: 0, aiC: 0, scN: 0, scC: 0, calls: [] });
+      const g = by.get(k), c = Number(r.cost_idr || 0);
+      if (r.kind === 'scan') { g.scN++; g.scC += c; } else { g.aiN++; g.aiC += c; }
+      g.calls.push(r);
+    }
+    const list = [...by.values()].sort((a, b) => a.k.localeCompare(b.k));
+    for (const g of list) g.calls.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+    const T = list.reduce((t, g) => ({ aiN: t.aiN + g.aiN, aiC: t.aiC + g.aiC, scN: t.scN + g.scN, scC: t.scC + g.scC }), { aiN: 0, aiC: 0, scN: 0, scC: 0 });
+    const range = usage.days === 1 ? 'Hari ini' : usage.days + ' hari terakhir';
+    const chips = [[1, 'Hari ini'], [7, '7 hari'], [14, '14 hari'], [30, '30 hari']].map(([d, t]) => `<button data-act="use-days" data-v="${d}" class="${usage.days === d ? 'on' : ''}">${t}</button>`).join('');
+    const mchips = [['cost', 'Biaya'], ['hit', 'Jumlah']].map(([v, t]) => `<button data-act="use-metric" data-v="${v}" class="${usage.metric === v ? 'on' : ''}">${t}</button>`).join('');
+    // the chart: one stacked bar per email (AI + Scan), A-Z
+    const val = (g) => usage.metric === 'cost' ? [g.aiC, g.scC] : [g.aiN, g.scN];
+    const max = Math.max(1, ...list.map((g) => val(g)[0] + val(g)[1]));
+    const fmt = (v) => usage.metric === 'cost' ? rp(v) : num(v);
+    const bars = list.map((g) => {
+      const [a, b] = val(g);
+      return `<div style="display:grid;grid-template-columns:minmax(120px,32%) 1fr auto;gap:8px;align-items:center;margin:4px 0">
+        <span class="mono" style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${who(g.k)}</span>
+        <span style="display:flex;height:14px;border-radius:7px;overflow:hidden;background:var(--line)"><i style="display:block;width:${(a / max) * 100}%;background:#1E8A9D"></i><i style="display:block;width:${(b / max) * 100}%;background:#E0A100"></i></span>
+        <span style="font-size:12px;font-weight:700;text-align:right">${fmt(a + b)}</span></div>`;
+    }).join('');
+    const legend = `<p class="hint"><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#1E8A9D"></span> AI (catat pakai AI, chat, jualan, ikon) &nbsp; <span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#E0A100"></span> Scan (struk, kategori scan, mutasi)</p>`;
+    const body = list.map((g) => {
+      const open = !!usage.open[g.k];
+      const detail = open ? `<tr><td colspan="7" style="padding:0 0 10px 14px"><table style="font-size:12px">${g.calls.map((c) => `<tr><td>${when(c.created_at)}</td><td>${esc(c.edge_function)}</td><td>${c.kind === 'scan' ? chip('am', 'Scan') : chip('bl', 'AI')}</td><td class="n">${rp(c.cost_idr)}</td></tr>`).join('')}</table></td></tr>` : '';
+      return `<tr><td class="mono">${who(g.k)}</td><td class="n">${num(g.aiN)}</td><td class="n">${rp(g.aiC)}</td><td class="n">${num(g.scN)}</td><td class="n">${rp(g.scC)}</td><td class="n"><b>${rp(g.aiC + g.scC)}</b></td><td class="n"><button class="btn sm sec" data-act="use-open" data-k="${esc(g.k)}">${open ? 'Tutup' : 'Rincian'}</button></td></tr>${detail}`;
+    }).join('');
+    return `<h1>Pemakaian AI</h1><p class="sub">${range} (WIB). Per email A–Z; rincian tiap email terbaru di atas. Kurs Rp17.900 per USD. Panggilan pemanas cache tidak dihitung.</p>
+      <div class="ctl">${ctl('Rentang', seg(chips))}${ctl('Grafik', seg(mchips))}${ctl('Opsi', seg(`<button data-act="use-sys" class="${usage.hideSys ? 'on' : ''}">Sembunyikan akun uji/sistem</button><button data-act="unmask" class="${unmask ? 'on' : ''}">Tampilkan email</button>`))}</div>
+      <div class="grid g3" style="margin-bottom:14px">
+        <div class="card kpi"><div class="v">${num(T.aiN)} · ${rp(T.aiC)}</div><div class="l">AI (hit · biaya)</div></div>
+        <div class="card kpi"><div class="v">${num(T.scN)} · ${rp(T.scC)}</div><div class="l">Scan (hit · biaya)</div></div>
+        <div class="card kpi"><div class="v">${num(list.length)} · ${rp(T.aiC + T.scC)}</div><div class="l">Akun · total biaya</div></div>
+      </div>
+      <div class="card" style="margin-bottom:14px"><h3>${usage.metric === 'cost' ? 'Biaya' : 'Jumlah panggilan'} per email</h3>${legend}${bars || '<p class="hint">Belum ada pemakaian.</p>'}</div>
+      <div class="card"><h3>Per email</h3><div class="tablewrap"><table><tr><th>Email</th><th class="n">AI hit</th><th class="n">AI biaya</th><th class="n">Scan hit</th><th class="n">Scan biaya</th><th class="n">Total</th><th></th></tr>${body || '<tr><td colspan="7" class="hint">Belum ada pemakaian.</td></tr>'}</table></div>${rows.length >= 20000 ? '<p class="hint">Dibatasi 20.000 panggilan terbaru.</p>' : ''}</div>`;
+  }
+
   // ------------------------------------------------------------------ Biaya AI
   const cost = { days: 7, fn: '', hideOwn: true };
   async function pgBiaya() {
@@ -957,7 +1006,8 @@
       usearch: () => { userQuery = $('#uq').value.trim(); route(); },
       unmask: () => { unmask = !unmask; route(); },
       tier: () => tierModal(el.dataset.email, el.dataset.type), 'tier-save': () => tierSave(el.dataset.email),
-      'cost-days': () => { cost.days = +el.dataset.v; route(); }, 'cost-own': () => { cost.hideOwn = !cost.hideOwn; route(); },
+      'cost-days': () => { cost.days = +el.dataset.v; route(); },
+      'use-days': () => { usage.days = +el.dataset.v; usage.open = {}; route(); }, 'use-metric': () => { usage.metric = el.dataset.v; route(); }, 'use-sys': () => { usage.hideSys = !usage.hideSys; route(); }, 'use-open': () => { usage.open[el.dataset.k] = !usage.open[el.dataset.k]; route(); }, 'cost-own': () => { cost.hideOwn = !cost.hideOwn; route(); },
       'quota-one': quotaOne, 'quota-all': quotaAllModal, 'quota-all-do': quotaAllDo,
       'ai-tab': () => { aip.tab = el.dataset.v; sgSave(); route(); }, 'ai-metric': () => { aip.metric = el.dataset.v; sgSave(); route(); }, 'ai-usearch': () => { aip.uq = ($('#aiq').value || '').trim(); sgSave(); route(); }, 'ai-pick': () => { aip.account = el.dataset.email; aip.tab = 'user'; aip.uq = ''; sgSave(); route(); }, 'ai-clear': () => { aip.account = ''; sgSave(); route(); }, 'ai-tier': () => { aip.list.tier = el.dataset.v; aip.list.page = 0; sgSave(); route(); }, 'ai-lrange': () => { aip.list.range = el.dataset.v; aip.list.page = 0; sgSave(); route(); }, 'ai-lsearch': () => { aip.list.q = ($('#aiq').value || '').trim(); aip.list.page = 0; sgSave(); route(); }, 'ai-page': () => { aip.list.page = Math.max(0, aip.list.page + Number(el.dataset.d)); sgSave(); route(); }, 'ai-csv': aiCsv, 'pl-toggle': playToggle, 'pl-save': playSaveVideo, 'pl-fmt': () => { play.fmt = el.dataset.v; $$('[data-act=pl-fmt]').forEach((b) => b.classList.toggle('on', b.dataset.v === play.fmt)); }, 'pl-replay': playReplay, 'pl-speed': () => { play.speed = el.dataset.v; $$('[data-act=pl-speed]').forEach((b) => b.classList.toggle('on', b.dataset.v === play.speed)); },'rel-save': relSave, 'ledger-add': () => ledgerAdd(el.dataset.kind), 'ledger-del': () => ledgerDel(el.dataset.id), 'sg-type': () => { prefOf(el.dataset.c).type = el.dataset.v; sgSave(); route(); }, 'sg-range': () => { prefOf(el.dataset.c).range = el.dataset.v; sgSave(); route(); }, 'sg-metric': () => { prefOf(el.dataset.c).metric = el.dataset.v; sgSave(); route(); }, 'set-save': () => setSave(el.dataset.key), 'sum-days': () => { sumDays = +el.dataset.v; route(); }, flag: () => flagToggle(el), 'param-save': () => paramSave(el.dataset.key),
     }[act];
