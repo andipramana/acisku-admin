@@ -795,7 +795,13 @@
   const usage = { days: 1, hideSys: true, metric: 'cost', open: {} };
   const SYS_RE = /demo|test|cache|synth|codex-re|rebecc/i;
   async function pgPemakaian() {
-    const rows = await rpc('admin_ai_usage', { p_days: usage.days });
+    // tier and labels (Gratis, Potensial, Rajin, Uji/sistem) always from all-time data, not the chosen range
+    const [rows, info] = await Promise.all([
+      rpc('admin_ai_usage', { p_days: usage.days }),
+      rpc('admin_ai_users', { p_from: null, p_to: null, p_tier: 'all', p_q: null, p_sort: 'calls', p_limit: 2000, p_offset: 0, p_function: null }),
+    ]);
+    const acc = new Map(info.map((r) => [String(r.account_key || '').toLowerCase(), r]));
+    const badges = (k) => { const r = acc.get(k); return r ? tierBadges(r) : tierChip('free'); };
     const by = new Map();
     for (const r of rows) {
       if (usage.hideSys && SYS_RE.test(r.account_key || '')) continue;
@@ -818,17 +824,17 @@
     const bars = list.map((g) => {
       const [a, b] = val(g);
       return `<div style="display:grid;grid-template-columns:minmax(120px,32%) 1fr auto;gap:8px;align-items:center;margin:4px 0">
-        <span class="mono" style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${who(g.k)}</span>
+        <span style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span class="mono">${who(g.k)}</span> ${badges(g.k)}</span>
         <span style="display:flex;height:14px;border-radius:7px;overflow:hidden;background:var(--line)"><i style="display:block;width:${(a / max) * 100}%;background:#1E8A9D"></i><i style="display:block;width:${(b / max) * 100}%;background:#E0A100"></i></span>
         <span style="font-size:12px;font-weight:700;text-align:right">${fmt(a + b)}</span></div>`;
     }).join('');
     const legend = `<p class="hint"><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#1E8A9D"></span> AI (catat pakai AI, chat, jualan, ikon) &nbsp; <span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#E0A100"></span> Scan (struk, kategori scan, mutasi)</p>`;
     const body = list.map((g) => {
       const open = !!usage.open[g.k];
-      const detail = open ? `<tr><td colspan="7" style="padding:0 0 10px 14px"><table style="font-size:12px">${g.calls.map((c) => `<tr><td>${when(c.created_at)}</td><td>${esc(c.edge_function)}</td><td>${c.kind === 'scan' ? chip('am', 'Scan') : chip('bl', 'AI')}</td><td class="n">${rp(c.cost_idr)}</td></tr>`).join('')}</table></td></tr>` : '';
-      return `<tr><td class="mono">${who(g.k)}</td><td class="n">${num(g.aiN)}</td><td class="n">${rp(g.aiC)}</td><td class="n">${num(g.scN)}</td><td class="n">${rp(g.scC)}</td><td class="n"><b>${rp(g.aiC + g.scC)}</b></td><td class="n"><button class="btn sm sec" data-act="use-open" data-k="${esc(g.k)}">${open ? 'Tutup' : 'Rincian'}</button></td></tr>${detail}`;
+      const detail = open ? `<tr><td colspan="8" style="padding:0 0 10px 14px"><table style="font-size:12px">${g.calls.map((c) => `<tr><td>${when(c.created_at)}</td><td>${esc(c.edge_function)}</td><td>${c.kind === 'scan' ? chip('am', 'Scan') : chip('bl', 'AI')}</td><td class="n">${rp(c.cost_idr)}</td></tr>`).join('')}</table></td></tr>` : '';
+      return `<tr><td class="mono">${who(g.k)}</td><td>${badges(g.k)}</td><td class="n">${num(g.aiN)}</td><td class="n">${rp(g.aiC)}</td><td class="n">${num(g.scN)}</td><td class="n">${rp(g.scC)}</td><td class="n"><b>${rp(g.aiC + g.scC)}</b></td><td class="n"><button class="btn sm sec" data-act="use-open" data-k="${esc(g.k)}">${open ? 'Tutup' : 'Rincian'}</button></td></tr>${detail}`;
     }).join('');
-    return `<h1>Pemakaian AI</h1><p class="sub">${range} (WIB). Per email A–Z; rincian tiap email terbaru di atas. Kurs Rp17.900 per USD. Panggilan pemanas cache tidak dihitung.</p>
+    return `<h1>Pemakaian AI</h1><p class="sub">${range} (WIB). Per email A–Z; rincian tiap email terbaru di atas. Kurs Rp17.900 per USD. Panggilan pemanas cache tidak dihitung. Paket dan label (Gratis, Potensial, Rajin) selalu dari seluruh riwayat, bukan rentang ini.</p>
       <div class="ctl">${ctl('Rentang', seg(chips))}${ctl('Grafik', seg(mchips))}${ctl('Opsi', seg(`<button data-act="use-sys" class="${usage.hideSys ? 'on' : ''}">Sembunyikan akun uji/sistem</button><button data-act="unmask" class="${unmask ? 'on' : ''}">Tampilkan email</button>`))}</div>
       <div class="grid g3" style="margin-bottom:14px">
         <div class="card kpi"><div class="v">${num(T.aiN)} · ${rp(T.aiC)}</div><div class="l">AI (hit · biaya)</div></div>
@@ -836,7 +842,7 @@
         <div class="card kpi"><div class="v">${num(list.length)} · ${rp(T.aiC + T.scC)}</div><div class="l">Akun · total biaya</div></div>
       </div>
       <div class="card" style="margin-bottom:14px"><h3>${usage.metric === 'cost' ? 'Biaya' : 'Jumlah panggilan'} per email</h3>${legend}${bars || '<p class="hint">Belum ada pemakaian.</p>'}</div>
-      <div class="card"><h3>Per email</h3><div class="tablewrap"><table><tr><th>Email</th><th class="n">AI hit</th><th class="n">AI biaya</th><th class="n">Scan hit</th><th class="n">Scan biaya</th><th class="n">Total</th><th></th></tr>${body || '<tr><td colspan="7" class="hint">Belum ada pemakaian.</td></tr>'}</table></div>${rows.length >= 20000 ? '<p class="hint">Dibatasi 20.000 panggilan terbaru.</p>' : ''}</div>`;
+      <div class="card"><h3>Per email</h3><div class="tablewrap"><table><tr><th>Email</th><th>Paket</th><th class="n">AI hit</th><th class="n">AI biaya</th><th class="n">Scan hit</th><th class="n">Scan biaya</th><th class="n">Total</th><th></th></tr>${body || '<tr><td colspan="8" class="hint">Belum ada pemakaian.</td></tr>'}</table></div>${rows.length >= 20000 ? '<p class="hint">Dibatasi 20.000 panggilan terbaru.</p>' : ''}</div>`;
   }
 
   // ------------------------------------------------------------------ Biaya AI
