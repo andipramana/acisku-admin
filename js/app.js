@@ -130,6 +130,7 @@
     ['keuangan', '💰', 'Keuangan', pgKeuangan],
     ['langganan', '⭐', 'Langganan', pgLangganan],
     ['kuota', '⏱️', 'Kuota AI', pgKuota],
+    ['promo', '🎁', 'Promo', pgPromo],
     ['rilis', '🚀', 'Rilis & pengaturan', pgRilis],
   ];
   let session = null;
@@ -1019,6 +1020,95 @@
     try { const r = await rpc('admin_reset_quota_all', { p_confirm: $('#qconfirm').value.trim() }); closeModal(); toast(`Direset: ${r.accounts} akun, ${r.devices} perangkat.`); } catch (e) { fail(e); }
   }
 
+  // ------------------------------------------------------------------ Promo (kuota AI tambahan untuk Free)
+  const promoUi = { q: '' };
+  const wibDate = (iso) => (iso ? new Date(new Date(iso).getTime() + 7 * 3600e3).toISOString().slice(0, 10) : '');
+  const wibEnd = (v) => (v ? new Date(v + 'T23:59:00+07:00').toISOString() : null);
+  const wibStart = (v) => (v ? new Date(v + 'T00:00:00+07:00').toISOString() : null);
+  async function pgPromo() {
+    const [st, list] = await Promise.all([rpc('admin_promo_settings'), rpc('admin_user_promos', { p_q: promoUi.q })]);
+    const rows = list.map((p) => `<tr><td><b>${esc(p.account_key)}</b>${p.note ? `<br><span class="hint">${esc(p.note)}</span>` : ''}</td>
+      <td class="n">+${p.amount}</td><td>${p.expires_at ? when(p.expires_at) : 'tanpa batas'}</td>
+      <td>${p.active ? chip('gr', 'Aktif') : (p.enabled ? chip('am', 'Berakhir') : chip('rd', 'Mati'))}</td>
+      <td class="n"><button class="btn sm sec" data-act="promo-edit" data-id="${esc(p.id)}" data-email="${esc(p.account_key)}" data-amount="${p.amount}" data-exp="${esc(wibDate(p.expires_at))}" data-en="${p.enabled ? 1 : 0}" data-note="${esc(p.note || '')}">Ubah</button></td></tr>`).join('');
+    return `<h1>Promo</h1><p class="sub">Kuota AI tambahan untuk akun Free (dasarnya ${st.free_base} per hari). Promo pengguna baru menggantikan promo umum selama berlaku, tidak ditumpuk. Setiap perubahan tercatat di log admin.</p>
+      <div class="grid g2">
+        <div class="card"><h3>Promo umum</h3><p class="hint">Untuk semua akun Free.</p>
+          <div class="row2"><div class="field"><label>Tambahan per hari</label><input id="pg-amt" inputmode="numeric" value="${st.global_amount}"></div>
+          <div class="field"><label>Berakhir (tanggal, 23:59 WIB)</label><input id="pg-until" type="date" value="${esc(wibDate(st.global_until))}"></div></div>
+          <div class="field"><label>Menyala</label><span class="switch ${st.global_enabled ? 'on' : ''}" id="pg-en" data-act="promo-sw"></span></div>
+          <button class="btn" data-act="promo-global">Simpan</button></div>
+        <div class="card"><h3>Promo pengguna baru</h3><p class="hint">Akun yang dibuat sejak tanggal di bawah dapat tambahan selama beberapa hari sejak daftar.</p>
+          <div class="row2"><div class="field"><label>Tambahan per hari</label><input id="pn-amt" inputmode="numeric" value="${st.new_user_amount}"></div>
+          <div class="field"><label>Lama (hari)</label><input id="pn-days" inputmode="numeric" value="${st.new_user_days}"></div></div>
+          <div class="field"><label>Berlaku untuk akun sejak (tanggal, 00:00 WIB)</label><input id="pn-since" type="date" value="${esc(wibDate(st.new_user_since))}"></div>
+          <button class="btn" data-act="promo-new">Simpan</button></div>
+      </div>
+      <div class="card"><h3>Promo per pengguna</h3><p class="hint">Kalau satu akun punya beberapa yang aktif, yang terbesar dipakai.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"><input id="pq" class="sm-input" placeholder="Cari email" value="${esc(promoUi.q)}"><button class="btn sm sec" data-act="promo-search">Cari</button><button class="btn sm" data-act="promo-edit" data-id="">Tambah</button><button class="btn sm sec" data-act="promo-bulk">Ubah banyak</button></div>
+        <div class="tablewrap"><table><tr><th>Akun</th><th class="n">Tambahan</th><th>Berakhir</th><th>Status</th><th></th></tr>${rows || '<tr><td colspan="5" class="hint">Belum ada.</td></tr>'}</table></div></div>`;
+  }
+  function promoNum(id, max) {
+    const n = parseInt($(id).value, 10);
+    if (!(n >= 0 && n <= max)) throw new Error('Angka tidak sah.');
+    return n;
+  }
+  async function promoGlobalSave() {
+    try {
+      const amount = promoNum('#pg-amt', 1000);
+      await rpc('admin_set_global_promo', { p_amount: amount, p_until: wibEnd($('#pg-until').value), p_enabled: $('#pg-en').classList.contains('on') });
+      toast('Promo umum disimpan.'); route();
+    } catch (e) { fail(e); }
+  }
+  async function promoNewSave() {
+    try {
+      const amount = promoNum('#pn-amt', 1000), days = promoNum('#pn-days', 365);
+      if (days < 1) throw new Error('Lama minimal 1 hari.');
+      const since = wibStart($('#pn-since').value);
+      if (!since) throw new Error('Isi tanggal mulai.');
+      if (!confirm('Simpan promo pengguna baru? Akun yang dibuat sejak tanggal itu langsung ikut.')) return;
+      await rpc('admin_set_new_user_promo', { p_amount: amount, p_days: days, p_since: since });
+      toast('Promo pengguna baru disimpan.'); route();
+    } catch (e) { fail(e); }
+  }
+  function promoEdit(el) {
+    const isNew = !el.dataset.id;
+    openModal(`<h3 style="margin:0 0 6px">${isNew ? 'Tambah promo pengguna' : 'Ubah promo pengguna'}</h3>
+      <div class="field"><label>Email akun</label><input id="pu-email" value="${esc(el.dataset.email || '')}" ${isNew ? '' : 'disabled'}></div>
+      <div class="row2"><div class="field"><label>Tambahan per hari</label><input id="pu-amt" inputmode="numeric" value="${esc(el.dataset.amount || '10')}"></div>
+      <div class="field"><label>Berakhir (tanggal, 23:59 WIB)</label><input id="pu-exp" type="date" value="${esc(el.dataset.exp || '')}"></div></div>
+      <div class="field"><label>Catatan</label><input id="pu-note" value="${esc(el.dataset.note || '')}"></div>
+      <div class="field"><label>Menyala</label><span class="switch ${isNew || el.dataset.en === '1' ? 'on' : ''}" id="pu-en" data-act="promo-sw"></span></div>
+      <div class="actions"><button class="btn sec" data-act="close">Batal</button><button class="btn" data-act="promo-user-save" data-id="${esc(el.dataset.id || '')}">Simpan</button></div>`);
+  }
+  async function promoUserSave(id) {
+    try {
+      const amount = promoNum('#pu-amt', 1000);
+      await rpc('admin_set_user_promo', { p_id: id || null, p_email: $('#pu-email').value.trim(), p_amount: amount, p_expires: wibEnd($('#pu-exp').value), p_enabled: $('#pu-en').classList.contains('on'), p_note: $('#pu-note').value });
+      closeModal(); toast('Promo disimpan.'); route();
+    } catch (e) { fail(e); }
+  }
+  function promoBulk() {
+    openModal(`<h3 style="margin:0 0 6px">Ubah banyak akun</h3>
+      <div class="field"><label>Email (satu per baris, atau dipisah koma)</label><textarea id="pb-list" rows="5"></textarea></div>
+      <div class="field"><label>Aksi</label><select id="pb-act"><option value="set">Beri atau ganti promo</option><option value="extend">Perpanjang promo yang aktif</option><option value="disable">Matikan promonya</option></select></div>
+      <div class="row2"><div class="field"><label>Tambahan per hari (beri)</label><input id="pb-amt" inputmode="numeric" value="10"></div>
+      <div class="field"><label>Berakhir (beri, 23:59 WIB)</label><input id="pb-exp" type="date"></div></div>
+      <div class="field"><label>Tambah hari (perpanjang)</label><input id="pb-days" inputmode="numeric" value="7"></div>
+      <p class="hint">Tercatat di log admin. Akun yang tidak ada dilewati.</p>
+      <div class="actions"><button class="btn sec" data-act="close">Batal</button><button class="btn" data-act="promo-bulk-save">Jalankan</button></div>`);
+  }
+  async function promoBulkSave() {
+    try {
+      const emails = $('#pb-list').value.split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean);
+      if (!emails.length) throw new Error('Isi minimal satu email.');
+      const action = $('#pb-act').value;
+      if (!confirm(`Jalankan "${action}" untuk ${emails.length} akun?`)) return;
+      const n = await rpc('admin_bulk_user_promo', { p_emails: emails, p_action: action, p_amount: parseInt($('#pb-amt').value, 10) || 0, p_expires: wibEnd($('#pb-exp').value), p_days: parseInt($('#pb-days').value, 10) || 0 });
+      closeModal(); toast(`${n} akun diubah.`); route();
+    } catch (e) { fail(e); }
+  }
+
   // ------------------------------------------------------------------ Rilis & pengaturan
   async function pgRilis() {
     const [rel, flags, params, audit, sets] = await Promise.all([rpc('admin_get_release'), rpc('admin_list_flags'), rpc('admin_list_parameters'), rpc('admin_audit_list', { p_limit: 15 }), rpc('admin_get_settings')]);
@@ -1075,6 +1165,7 @@
       usearch: () => { userQuery = $('#uq').value.trim(); route(); },
       unmask: () => { unmask = !unmask; route(); },
       tier: () => tierModal(el.dataset.email, el.dataset.type), 'tier-save': () => tierSave(el.dataset.email),
+      'promo-sw': () => el.classList.toggle('on'), 'promo-global': promoGlobalSave, 'promo-new': promoNewSave, 'promo-edit': () => promoEdit(el), 'promo-user-save': () => promoUserSave(el.dataset.id), 'promo-bulk': promoBulk, 'promo-bulk-save': promoBulkSave, 'promo-search': () => { promoUi.q = $('#pq').value.trim(); route(); },
       biz: () => bizModal(el.dataset.email), 'biz-save': () => bizSave(el.dataset.email),
       'cost-days': () => { cost.days = +el.dataset.v; route(); },
       'use-days': () => { usage.days = +el.dataset.v; usage.open = {}; route(); }, 'use-metric': () => { usage.metric = el.dataset.v; route(); }, 'use-sys': () => { usage.hideSys = !usage.hideSys; route(); }, 'use-open': () => { usage.open[el.dataset.k] = !usage.open[el.dataset.k]; route(); }, 'cost-own': () => { cost.hideOwn = !cost.hideOwn; route(); },

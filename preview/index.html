@@ -51,6 +51,7 @@ tr:last-child td{border:0}
 .tablewrap{overflow-x:auto}
 .btn{border:0;border-radius:12px;padding:10px 16px;font-weight:700;background:var(--green);color:#fff;cursor:pointer}
 .btn.sec{background:var(--greenbg);color:var(--green)}.btn.dng{background:var(--red)}.btn.sm{padding:6px 12px;font-size:12px}
+.btn.sec{display:inline-block}
 .field{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
 .field label{font-size:12px;font-weight:700;color:var(--muted)}
 input,select,textarea{border:1px solid var(--line);background:var(--card);border-radius:12px;padding:10px 12px}
@@ -191,6 +192,25 @@ textarea{min-height:76px;resize:vertical}
   </div>
 </section>
 
+<section class="sec" id="s-promo">
+  <h1>Promo</h1><p class="sub">Kuota AI tambahan untuk akun Free (dasarnya 10 per hari). Promo pengguna baru menggantikan promo umum selama berlaku, tidak ditumpuk. Setiap perubahan tercatat di log admin.</p>
+  <div class="grid g2">
+    <div class="card"><h3>Promo umum</h3><p class="hint">Untuk semua akun Free.</p>
+      <div class="row2"><div class="field"><label>Tambahan per hari</label><input value="5"></div><div class="field"><label>Berakhir (tanggal, 23:59 WIB)</label><input type="date" value="2026-12-31"></div></div>
+      <div class="field"><label>Menyala</label><span class="switch on"></span></div><button class="btn">Simpan</button></div>
+    <div class="card"><h3>Promo pengguna baru</h3><p class="hint">Akun yang dibuat sejak tanggal di bawah dapat tambahan selama beberapa hari sejak daftar.</p>
+      <div class="row2"><div class="field"><label>Tambahan per hari</label><input value="5"></div><div class="field"><label>Lama (hari)</label><input value="7"></div></div>
+      <div class="field"><label>Berlaku untuk akun sejak (tanggal, 00:00 WIB)</label><input type="date" value="2026-11-09"></div><button class="btn">Simpan</button></div>
+  </div>
+  <div class="card"><h3>Promo per pengguna</h3><p class="hint">Kalau satu akun punya beberapa yang aktif, yang terbesar dipakai.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"><input class="sm-input" placeholder="Cari email"><button class="btn sm sec">Cari</button><button class="btn sm">Tambah</button><button class="btn sm sec">Ubah banyak</button></div>
+    <div class="tablewrap"><table><tr><th>Akun</th><th class="n">Tambahan</th><th>Berakhir</th><th>Status</th><th></th></tr>
+      <tr><td><b>budi@contoh.test</b><br><span class="hint">Tester beta</span></td><td class="n">+20</td><td>15 Des, 23.59</td><td><span class="chip gr">Aktif</span></td><td class="n"><button class="btn sm sec">Ubah</button></td></tr>
+      <tr><td><b>sari@contoh.test</b></td><td class="n">+10</td><td>tanpa batas</td><td><span class="chip gr">Aktif</span></td><td class="n"><button class="btn sm sec">Ubah</button></td></tr>
+      <tr><td><b>andi@contoh.test</b></td><td class="n">+50</td><td>1 Nov, 23.59</td><td><span class="chip am">Berakhir</span></td><td class="n"><button class="btn sm sec">Ubah</button></td></tr>
+      <tr><td><b>dewi@contoh.test</b></td><td class="n">+15</td><td>20 Des, 23.59</td><td><span class="chip rd">Mati</span></td><td class="n"><button class="btn sm sec">Ubah</button></td></tr></table></div></div>
+</section>
+
 <section class="sec" id="s-rilis">
   <h1>Rilis dan pengaturan</h1><p class="sub">Versi aplikasi, fitur uji, dan parameter. Query “Update Min Version”, “Toggle Streak Test”, “Select URL”.</p>
   <div class="grid g2">
@@ -219,7 +239,7 @@ textarea{min-height:76px;resize:vertical}
 <script>
 if(location.search.includes('in'))document.getElementById('login').classList.remove('on');
 const confirm_=document.getElementById('confirm');
-const items=[['ringkasan','📊','Ringkasan'],['pengumuman','📢','Pengumuman'],['pengguna','👤','Pengguna'],['biaya','💸','Biaya AI'],['kuota','⏱️','Kuota AI'],['rilis','🚀','Rilis & pengaturan']];
+const items=[['ringkasan','📊','Ringkasan'],['pengumuman','📢','Pengumuman'],['pengguna','👤','Pengguna'],['biaya','💸','Biaya AI'],['kuota','⏱️','Kuota AI'],['promo','🎁','Promo'],['rilis','🚀','Rilis & pengaturan']];
 for(const id of ['nav1','nav2']){document.getElementById(id).innerHTML=items.map(([k,i,t])=>`<a href="#${k}" data-k="${k}"><span class="i">${i}</span>${t}</a>`).join('')}
 function route(){const k=(location.hash||'#ringkasan').slice(1);document.querySelectorAll('.sec').forEach(s=>s.classList.toggle('on',s.id==='s-'+k));document.querySelectorAll('.nav a').forEach(a=>a.classList.toggle('on',a.dataset.k===k))}
 addEventListener('hashchange',route);route();
