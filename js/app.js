@@ -205,6 +205,7 @@
   let sumDays = 14;
   async function pgRingkasan() {
     const [o, su, co, pf, sets] = await Promise.all([rpc('admin_overview'), rpc('admin_signups_per_day', { p_days: sumDays }), rpc('admin_ai_cost_per_day', { p_days: sumDays }), rpc('admin_profit_estimate', { p_days: 30 }), rpc('admin_get_settings')]);
+    const ot30 = await rpc('admin_one_time_summary', { p_from: new Date(Date.now() - 30 * 86400e3).toISOString() });
     const y = Number(o.ai_cost_idr_yesterday || 0), t = Number(o.ai_cost_idr_today || 0);
     const delta = y > 0 ? Math.round(((t - y) / y) * 100) : null;
     const rel = o.release || {};
@@ -224,12 +225,14 @@
     const lines = calcRows.join('');
     const profitCard = `<div class="card" style="margin-bottom:14px"><h3>Estimasi keuntungan ${pf.days} hari terakhir</h3>
       <p class="hint">Perkiraan pendapatan langganan dikurangi potongan Google dan biaya AI. Bukan laporan keuangan.</p>
-      <div class="grid g2"><div><div class="kpi"><div class="v ${Number(pf.profit) < 0 ? 'down' : 'up'}">${Number(pf.profit) < 0 ? '−' : ''}${rp(Math.abs(pf.profit))}</div><div class="l">Estimasi keuntungan</div></div>
-        <p class="hint" style="margin-top:10px;line-height:1.5">Rumusnya harga × jumlah pembayaran. Pembayaran pertama pelanggan baru memakai harga diskon. Belum termasuk donasi Traktir Matcha (tidak tercatat di server), pajak, dan pengembalian dana. Langganan hadiah tidak punya pendapatan. Harga dan potongan bisa diubah di <a href="#rilis">Rilis dan pengaturan</a>. Ringkasan sepanjang waktu ada di <a href="#keuangan">Keuangan</a>.</p></div>
+      <div class="grid g2"><div><div class="kpi"><div class="v ${Number(pf.profit) + Number(ot30.net) < 0 ? 'down' : 'up'}">${Number(pf.profit) + Number(ot30.net) < 0 ? '−' : ''}${rp(Math.abs(Number(pf.profit) + Number(ot30.net)))}</div><div class="l">Estimasi keuntungan</div></div>
+        <p class="hint" style="margin-top:10px;line-height:1.5">Rumusnya harga × jumlah pembayaran. Pembayaran pertama pelanggan baru memakai harga diskon. Donasi Traktir Matcha ikut kalau sudah kamu catat di Keuangan; belum termasuk pajak, dan pengembalian dana. Langganan hadiah tidak punya pendapatan. Harga dan potongan bisa diubah di <a href="#rilis">Rilis dan pengaturan</a>. Ringkasan sepanjang waktu ada di <a href="#keuangan">Keuangan</a>.</p></div>
         <div class="tablewrap"><table>${lines}
-          <tr><td><b>Pendapatan kotor</b></td><td class="n"><b>${rp(pf.gross)}</b></td></tr>
-          <tr><td>− Potongan Google ${num(pf.fee_percent)}%</td><td class="n">${rp(pf.fee)}</td></tr>
-          <tr><td><b>Pendapatan bersih</b></td><td class="n"><b>${rp(pf.net)}</b></td></tr>
+          <tr><td>Langganan</td><td class="n">${rp(pf.gross)}</td></tr>
+          <tr><td>Produk sekali beli (${num(ot30.n)}, yang dicatat di <a href="#keuangan">Keuangan</a>)</td><td class="n">${rp(ot30.gross)}</td></tr>
+          <tr><td><b>Pendapatan kotor</b></td><td class="n"><b>${rp(Number(pf.gross) + Number(ot30.gross))}</b></td></tr>
+          <tr><td>− Potongan Google ${num(pf.fee_percent)}%</td><td class="n">${rp(Number(pf.fee) + Number(ot30.fee))}</td></tr>
+          <tr><td><b>Pendapatan bersih</b></td><td class="n"><b>${rp(Number(pf.net) + Number(ot30.net))}</b></td></tr>
           <tr><td>− Biaya AI (${num(pf.ai_calls)} permintaan)</td><td class="n">${rp(pf.ai_cost)}</td></tr>
           ${Number(pf.gift_accounts) ? `<tr><td class="hint">${chip('am', 'Gratis')} ${num(pf.gift_accounts)} akun hadiah: pendapatan Rp0, biaya AI-nya (${rp(pf.gift_ai_cost)}) tetap ikut dihitung di atas</td><td></td></tr>` : ''}</table></div></div></div>`;
     return `<h1>Ringkasan</h1><p class="sub">Angka utama. Hari dihitung WIB. Biaya AI menghitung semua akun, termasuk akun uji dan sistem.</p>
@@ -953,14 +956,18 @@
     <button class="btn" data-act="ledger-add" data-kind="${kind}">Catat</button></div>`;
 
   async function pgKeuangan() {
-    const [f, led, bal] = await Promise.all([rpc('admin_finance_summary'), rpc('admin_ledger_list'), aiBalance()]);
+    const [f, led, bal, ot] = await Promise.all([rpc('admin_finance_summary'), rpc('admin_ledger_list'), aiBalance(), otLoad()]);
+    // all-time totals for the money rows: the one-time products are counted apart from the subscriptions
+    const otAll = await rpc('admin_one_time_summary');
+    const gross = Number(f.gross) + Number(otAll.gross), fee = Number(f.fee) + Number(otAll.fee), net = Number(f.net) + Number(otAll.net);
+    const profitAll = Number(f.profit) + Number(otAll.net), availAll = Number(f.available) + Number(otAll.net);
     const wd = led.filter((l) => l.kind === 'withdrawal'), tp = led.filter((l) => l.kind === 'ai_topup');
     const since = f.since ? new Date(f.since + 'T00:00:00').toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) : '—';
     const balCard = bal.error
       ? `<p class="hint">Saldo belum bisa diambil: ${esc(bal.error)}</p>`
       : (bal.balances || []).map((b) => `<div class="kpi"><div class="v">${esc(b.currency)} ${esc(b.total)}</div><div class="l">isi ulang ${esc(b.topped_up)} · bonus ${esc(b.granted)}${b.currency === 'USD' ? ' · sekitar ' + rp(Number(b.total) * 17900) : ''}</div></div>`).join('') + (bal.is_available ? '' : '<p class="warn">DeepSeek menyatakan saldo tidak cukup untuk memanggil API.</p>');
-    const profitNeg = Number(f.profit) < 0;
-    return `<h1>Keuangan</h1><p class="sub">Ringkasan sejak ${esc(since)} dan catatan uang masuk keluar yang kamu isi sendiri. Pendapatan adalah perkiraan dari langganan Play.</p>
+    const profitNeg = profitAll < 0;
+    return `<h1>Keuangan</h1><p class="sub">Ringkasan sejak ${esc(since)} dan catatan uang masuk keluar yang kamu isi sendiri. Pendapatan langganan adalah perkiraan dari langganan Play; produk sekali beli ikut dari yang kamu catat.</p>
       <div class="grid g2" style="margin-bottom:14px">
         <div class="card"><h3>Saldo DeepSeek sekarang</h3><p class="hint">Diambil langsung dari DeepSeek lewat server, kunci tidak keluar dari server.</p>${balCard}<button class="btn sec sm" data-act="reload" style="margin-top:10px">Muat ulang</button></div>
         <div class="card"><h3>Modal AI</h3><div class="tablewrap"><table>
@@ -969,14 +976,17 @@
           <tr><td class="hint">Selisih ini hanya pembanding kasar: biaya dihitung dari catatan panggilan, saldo asli ada di kiri.</td><td class="n">${rp(Number(f.ai_topups) - Number(f.ai_cost))}</td></tr></table></div></div>
       </div>
       <div class="card" style="margin-bottom:14px"><h3>Ringkasan sepanjang waktu</h3><div class="tablewrap"><table>
-        <tr><td>Pendapatan kotor (perkiraan)</td><td class="n">${rp(f.gross)}</td></tr>
-        <tr><td>− Potongan Google ${num(f.fee_percent)}%</td><td class="n">${rp(f.fee)}</td></tr>
-        <tr><td><b>Pendapatan bersih</b></td><td class="n"><b>${rp(f.net)}</b></td></tr>
+        <tr><td>Langganan (perkiraan)</td><td class="n">${rp(f.gross)}</td></tr>
+        <tr><td>Produk sekali beli (yang kamu catat)</td><td class="n">${rp(otAll.gross)}</td></tr>
+        <tr><td><b>Pendapatan kotor</b></td><td class="n"><b>${rp(gross)}</b></td></tr>
+        <tr><td>− Potongan Google ${num(f.fee_percent)}%</td><td class="n">${rp(fee)}</td></tr>
+        <tr><td><b>Pendapatan bersih</b></td><td class="n"><b>${rp(net)}</b></td></tr>
         <tr><td>− Biaya AI semua akun</td><td class="n">${rp(f.ai_cost)}</td></tr>
         <tr><td class="hint">${chip('am', 'Gratis')} termasuk biaya akun hadiah ${rp(f.ai_cost_gift)} (pendapatannya Rp0, biayanya tetap dihitung)</td><td></td></tr>
-        <tr><td><b>Estimasi keuntungan total</b></td><td class="n ${profitNeg ? 'down' : 'up'}"><b>${profitNeg ? '−' : ''}${rp(Math.abs(f.profit))}</b></td></tr>
+        <tr><td><b>Estimasi keuntungan total</b></td><td class="n ${profitNeg ? 'down' : 'up'}"><b>${profitNeg ? '−' : ''}${rp(Math.abs(profitAll))}</b></td></tr>
         <tr><td>− Keuntungan yang sudah diambil</td><td class="n">${rp(f.withdrawn)}</td></tr>
-        <tr><td><b>Keuntungan yang belum diambil</b></td><td class="n"><b>${Number(f.available) < 0 ? '−' : ''}${rp(Math.abs(f.available))}</b></td></tr></table></div></div>
+        <tr><td><b>Keuntungan yang belum diambil</b></td><td class="n"><b>${availAll < 0 ? '−' : ''}${rp(Math.abs(availAll))}</b></td></tr></table></div></div>
+      ${otSection(ot)}
       <div class="grid g2">
         <div>${ledgerForm('withdrawal', 'Keuntungan diambil', 'Catat setiap kali kamu menarik keuntungan.')}
           <div class="card" style="margin-top:14px"><h3>Riwayat pengambilan</h3><div class="tablewrap"><table>${ledgerRows(wd)}</table></div></div></div>
@@ -995,6 +1005,69 @@
   async function ledgerDel(id) {
     if (!confirm('Hapus catatan ini?')) return;
     try { await rpc('admin_ledger_delete', { p_id: Number(id) }); toast('Dihapus.'); route(); } catch (e) { fail(e); }
+  }
+
+  // ------------------------------------------------------------------ Produk sekali beli (Traktir Matcha, dicatat tangan)
+  const OT_PRODUCTS = [['matcha_kecil', 'Matcha kecil'], ['matcha_sedang', 'Matcha sedang'], ['matcha_besar', 'Matcha besar']];
+  const otName = (id) => (OT_PRODUCTS.find((p) => p[0] === id) || [id, id])[1];
+  const otUi = { from: '', to: '' };
+  const wibLocal = (iso) => (iso ? new Date(new Date(iso).getTime() + 7 * 3600e3).toISOString().slice(0, 16) : '');
+  const moneyIn = (n, cur) => (cur === 'IDR' ? rp(n) : cur + ' ' + Number(n).toLocaleString('id-ID', { maximumFractionDigits: 2 }));
+  async function otLoad() {
+    const from = otUi.from ? new Date(otUi.from + 'T00:00:00+07:00').toISOString() : null;
+    const to = otUi.to ? new Date(new Date(otUi.to + 'T00:00:00+07:00').getTime() + 86400e3).toISOString() : null;
+    const [list, sum] = await Promise.all([rpc('admin_one_time_list', { p_from: from, p_to: to }), rpc('admin_one_time_summary', { p_from: from, p_to: to })]);
+    return { list, sum };
+  }
+  function otSection(ot) {
+    const rows = ot.list.map((p) => `<tr><td>${when(p.purchased_at)}<br><span class="hint">${esc(p.note || '')}</span></td>
+      <td><b>${esc(otName(p.product_id))}</b>${p.account_email ? `<br><span class="hint">${esc(p.account_email)}</span>` : ''}${p.order_id ? `<br><span class="hint mono pm">${esc(p.order_id)}</span>` : ''}</td>
+      <td class="n">${esc(moneyIn(p.amount, p.currency))}</td>
+      <td class="n"><button class="btn sm sec" data-act="ot-edit" data-id="${esc(p.id)}">Ubah</button> <button class="btn sm sec" data-act="ot-del" data-id="${esc(p.id)}">Hapus</button></td></tr>`).join('');
+    otUi.rows = Object.fromEntries(ot.list.map((p) => [p.id, p]));
+    const s = ot.sum;
+    return `<div class="card" style="margin-bottom:14px"><h3>Produk sekali beli</h3>
+      <p class="hint">Traktir Matcha dan produk sekali beli lain dari Google Play. Aplikasi belum mengirim pembelian ini ke server, jadi catat sendiri dari daftar pesanan Play Console. Dihitung terpisah dari langganan.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:end">
+        <div class="field" style="margin:0"><label>Dari</label><input id="ot-from" type="date" value="${esc(otUi.from)}"></div>
+        <div class="field" style="margin:0"><label>Sampai</label><input id="ot-to" type="date" value="${esc(otUi.to)}"></div>
+        <button class="btn sm sec" data-act="ot-filter">Terapkan</button><button class="btn sm" data-act="ot-edit" data-id="">Tambah</button></div>
+      <p style="margin:0 0 10px"><b>${num(s.n)}</b> pembelian · kotor <b>${rp(s.gross)}</b> · bersih setelah potongan ${num(s.fee_percent)}% <b>${rp(s.net)}</b>${Number(s.unconverted) ? ` · ${chip('am', num(s.unconverted) + ' pembelian mata uang lain tidak dihitung')}` : ''}</p>
+      <div class="tablewrap"><table><tr><th>Tanggal</th><th>Produk</th><th class="n">Jumlah</th><th></th></tr>${rows || '<tr><td colspan="4" class="hint">Belum ada.</td></tr>'}</table></div></div>`;
+  }
+  function otEdit(el) {
+    const p = el.dataset.id ? otUi.rows[el.dataset.id] : null;
+    const known = p && OT_PRODUCTS.some((x) => x[0] === p.product_id);
+    const sel = p ? (known ? p.product_id : 'lain') : 'matcha_kecil';
+    const nowWib = wibLocal(new Date().toISOString());
+    openModal(`<h3 style="margin:0 0 6px">${p ? 'Ubah pembelian' : 'Tambah pembelian'}</h3>
+      <div class="field"><label>Produk</label><select id="ot-prod">${OT_PRODUCTS.map((x) => `<option value="${x[0]}" ${sel === x[0] ? 'selected' : ''}>${x[1]}</option>`).join('')}<option value="lain" ${sel === 'lain' ? 'selected' : ''}>Lainnya</option></select></div>
+      <div class="field"><label>Kalau lainnya: id produk</label><input id="ot-other" value="${esc(p && !known ? p.product_id : '')}" placeholder="mis. matcha_raksasa"></div>
+      <div class="field"><label>Tanggal dan jam (WIB)</label><input id="ot-at" type="datetime-local" value="${esc(p ? wibLocal(p.purchased_at) : nowWib)}"></div>
+      <div class="row2"><div class="field"><label>Jumlah</label><input id="ot-amt" inputmode="decimal" value="${p ? esc(p.amount) : ''}" placeholder="mis. 1.99"></div>
+      <div class="field"><label>Mata uang</label><input id="ot-cur" value="${esc(p ? p.currency : 'USD')}" maxlength="3"></div></div>
+      <div class="field"><label>Email pembeli (opsional)</label><input id="ot-email" value="${esc(p ? p.account_email || '' : '')}"></div>
+      <div class="field"><label>Order id (opsional, mis. GPA.1234-5678)</label><input id="ot-order" value="${esc(p ? p.order_id || '' : '')}"></div>
+      <div class="field"><label>Catatan (opsional)</label><input id="ot-note" value="${esc(p ? p.note || '' : '')}"></div>
+      <p class="hint">USD dihitung Rp17.900 per dolar; mata uang selain IDR dan USD dicatat tetapi belum ikut total.</p>
+      <div class="actions"><button class="btn sec" data-act="close">Batal</button><button class="btn" data-act="ot-save" data-id="${esc(el.dataset.id || '')}">Simpan</button></div>`);
+  }
+  async function otSave(id) {
+    try {
+      const sel = $('#ot-prod').value;
+      const product = sel === 'lain' ? $('#ot-other').value.trim() : sel;
+      const amount = Number(String($('#ot-amt').value).replace(',', '.'));
+      if (!product) throw new Error('Isi produknya.');
+      if (!(amount > 0)) throw new Error('Isi jumlahnya.');
+      const at = $('#ot-at').value;
+      const args = { p_product_id: product, p_purchased_at: at ? new Date(at + ':00+07:00').toISOString() : null, p_amount: amount, p_currency: $('#ot-cur').value.trim() || 'USD', p_email: $('#ot-email').value, p_order_id: $('#ot-order').value, p_note: $('#ot-note').value };
+      if (id) await rpc('admin_one_time_update', { p_id: id, ...args }); else await rpc('admin_one_time_add', args);
+      closeModal(); toast('Pembelian disimpan.'); route();
+    } catch (e) { fail(e); }
+  }
+  async function otDel(id) {
+    if (!confirm('Hapus pembelian ini?')) return;
+    try { await rpc('admin_one_time_delete', { p_id: id }); toast('Dihapus.'); route(); } catch (e) { fail(e); }
   }
 
   // ------------------------------------------------------------------ Kuota AI
@@ -1165,6 +1238,7 @@
       usearch: () => { userQuery = $('#uq').value.trim(); route(); },
       unmask: () => { unmask = !unmask; route(); },
       tier: () => tierModal(el.dataset.email, el.dataset.type), 'tier-save': () => tierSave(el.dataset.email),
+      'ot-edit': () => otEdit(el), 'ot-save': () => otSave(el.dataset.id), 'ot-del': () => otDel(el.dataset.id), 'ot-filter': () => { otUi.from = $('#ot-from').value; otUi.to = $('#ot-to').value; route(); },
       'promo-sw': () => el.classList.toggle('on'), 'promo-global': promoGlobalSave, 'promo-new': promoNewSave, 'promo-edit': () => promoEdit(el), 'promo-user-save': () => promoUserSave(el.dataset.id), 'promo-bulk': promoBulk, 'promo-bulk-save': promoBulkSave, 'promo-search': () => { promoUi.q = $('#pq').value.trim(); route(); },
       biz: () => bizModal(el.dataset.email), 'biz-save': () => bizSave(el.dataset.email),
       'cost-days': () => { cost.days = +el.dataset.v; route(); },

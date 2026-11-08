@@ -211,6 +211,41 @@ textarea{min-height:76px;resize:vertical}
       <tr><td><b>dewi@contoh.test</b></td><td class="n">+15</td><td>20 Des, 23.59</td><td><span class="chip rd">Mati</span></td><td class="n"><button class="btn sm sec">Ubah</button></td></tr></table></div></div>
 </section>
 
+<section class="sec" id="s-keuangan">
+  <h1>Keuangan</h1><p class="sub">Ringkasan sejak 12 Oktober 2026 dan catatan uang masuk keluar yang kamu isi sendiri. Pendapatan langganan adalah perkiraan dari langganan Play; produk sekali beli ikut dari yang kamu catat.</p>
+  <div class="card" style="margin-bottom:14px"><h3>Ringkasan sepanjang waktu</h3><div class="tablewrap"><table>
+    <tr><td>Langganan (perkiraan)</td><td class="n">Rp1.250.000</td></tr>
+    <tr><td>Produk sekali beli (yang kamu catat)</td><td class="n">Rp212.350</td></tr>
+    <tr><td><b>Pendapatan kotor</b></td><td class="n"><b>Rp1.462.350</b></td></tr>
+    <tr><td>− Potongan Google 15%</td><td class="n">Rp219.353</td></tr>
+    <tr><td><b>Pendapatan bersih</b></td><td class="n"><b>Rp1.242.998</b></td></tr>
+    <tr><td>− Biaya AI semua akun</td><td class="n">Rp310.000</td></tr>
+    <tr><td><b>Estimasi keuntungan total</b></td><td class="n up"><b>Rp932.998</b></td></tr></table></div></div>
+  <div class="card" style="margin-bottom:14px"><h3>Produk sekali beli</h3>
+    <p class="hint">Traktir Matcha dan produk sekali beli lain dari Google Play. Aplikasi belum mengirim pembelian ini ke server, jadi catat sendiri dari daftar pesanan Play Console. Dihitung terpisah dari langganan.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:end">
+      <div class="field" style="margin:0"><label>Dari</label><input type="date" value="2026-11-01"></div>
+      <div class="field" style="margin:0"><label>Sampai</label><input type="date" value="2026-11-08"></div>
+      <button class="btn sm sec">Terapkan</button><button class="btn sm" onclick="otm.classList.add('on')">Tambah</button></div>
+    <p style="margin:0 0 10px"><b>4</b> pembelian · kotor <b>Rp212.350</b> · bersih setelah potongan 15% <b>Rp180.498</b> · <span class="chip am">1 pembelian mata uang lain tidak dihitung</span></p>
+    <div class="tablewrap"><table><tr><th>Tanggal</th><th>Produk</th><th class="n">Jumlah</th><th></th></tr>
+      <tr><td>7 Nov, 09.12<br><span class="hint">dari Play Console</span></td><td><b>Matcha besar</b><br><span class="hint">budi@contoh.test</span><br><span class="hint mono pm">GPA.3321-8890-1234</span></td><td class="n">USD 9,99</td><td class="n"><button class="btn sm sec">Ubah</button> <button class="btn sm sec">Hapus</button></td></tr>
+      <tr><td>6 Nov, 12.40</td><td><b>Matcha sedang</b></td><td class="n">Rp25.000</td><td class="n"><button class="btn sm sec">Ubah</button> <button class="btn sm sec">Hapus</button></td></tr>
+      <tr><td>5 Nov, 20.05</td><td><b>Matcha kecil</b></td><td class="n">USD 1,99</td><td class="n"><button class="btn sm sec">Ubah</button> <button class="btn sm sec">Hapus</button></td></tr>
+      <tr><td>5 Nov, 08.30</td><td><b>Matcha besar</b></td><td class="n">EUR 9,99</td><td class="n"><button class="btn sm sec">Ubah</button> <button class="btn sm sec">Hapus</button></td></tr></table></div></div>
+</section>
+
+<div class="modal" id="otm"><div class="box">
+  <h3 style="margin:0 0 6px">Tambah pembelian</h3>
+  <div class="field"><label>Produk</label><select><option>Matcha kecil</option><option>Matcha sedang</option><option>Matcha besar</option><option>Lainnya</option></select></div>
+  <div class="field"><label>Tanggal dan jam (WIB)</label><input type="datetime-local" value="2026-11-08T10:30"></div>
+  <div class="row2"><div class="field"><label>Jumlah</label><input value="1.99"></div><div class="field"><label>Mata uang</label><input value="USD"></div></div>
+  <div class="field"><label>Email pembeli (opsional)</label><input></div>
+  <div class="field"><label>Order id (opsional, mis. GPA.1234-5678)</label><input></div>
+  <div class="field"><label>Catatan (opsional)</label><input></div>
+  <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn sec" onclick="otm.classList.remove('on')">Batal</button><button class="btn">Simpan</button></div>
+</div></div>
+
 <section class="sec" id="s-rilis">
   <h1>Rilis dan pengaturan</h1><p class="sub">Versi aplikasi, fitur uji, dan parameter. Query “Update Min Version”, “Toggle Streak Test”, “Select URL”.</p>
   <div class="grid g2">
@@ -238,8 +273,8 @@ textarea{min-height:76px;resize:vertical}
 <div class="demo">Contoh tampilan · data bukan asli</div>
 <script>
 if(location.search.includes('in'))document.getElementById('login').classList.remove('on');
-const confirm_=document.getElementById('confirm');
-const items=[['ringkasan','📊','Ringkasan'],['pengumuman','📢','Pengumuman'],['pengguna','👤','Pengguna'],['biaya','💸','Biaya AI'],['kuota','⏱️','Kuota AI'],['promo','🎁','Promo'],['rilis','🚀','Rilis & pengaturan']];
+const confirm_=document.getElementById('confirm');const otm=document.getElementById('otm');if(location.search.includes('modal'))otm.classList.add('on');
+const items=[['ringkasan','📊','Ringkasan'],['pengumuman','📢','Pengumuman'],['pengguna','👤','Pengguna'],['biaya','💸','Biaya AI'],['kuota','⏱️','Kuota AI'],['keuangan','💰','Keuangan'],['promo','🎁','Promo'],['rilis','🚀','Rilis & pengaturan']];
 for(const id of ['nav1','nav2']){document.getElementById(id).innerHTML=items.map(([k,i,t])=>`<a href="#${k}" data-k="${k}"><span class="i">${i}</span>${t}</a>`).join('')}
 function route(){const k=(location.hash||'#ringkasan').slice(1);document.querySelectorAll('.sec').forEach(s=>s.classList.toggle('on',s.id==='s-'+k));document.querySelectorAll('.nav a').forEach(a=>a.classList.toggle('on',a.dataset.k===k))}
 addEventListener('hashchange',route);route();
