@@ -777,7 +777,7 @@
   async function pgPengguna() {
     const users = await rpc('admin_find_users', { p_q: userQuery });
     const rows = users.map((u) => `<tr><td>${who(u.email)}<br><span class="hint">daftar ${when(u.created_at)} · masuk ${when(u.last_sign_in_at)}</span></td><td>${tierChip(u.subscription_type)}</td><td>${u.tier_source === 'gift' ? chip('am', 'Gratis (hadiah)') : esc(u.tier_source || '—')}</td>
-      <td class="n">${u.tier_source === 'play' ? '<span class="hint">dari Play</span>' : `<button class="btn sm sec" data-act="tier" data-email="${esc(u.email)}" data-type="${esc(u.subscription_type)}">Ubah</button>`}</td></tr>`).join('');
+      <td class="n">${u.tier_source === 'play' ? '<span class="hint">dari Play</span>' : `<button class="btn sm sec" data-act="tier" data-email="${esc(u.email)}" data-type="${esc(u.subscription_type)}">Ubah</button>`} <button class="btn sm sec" data-act="biz" data-email="${esc(u.email)}">Mode Bisnis</button></td></tr>`).join('');
     return `<h1>Pengguna</h1><p class="sub">Cari akun dan ubah paketnya (hadiah). Paket yang berasal dari Google Play tidak bisa diubah di sini.</p>
       <div class="card"><div class="searchrow"><input id="uq" placeholder="email atau sebagian email" value="${esc(userQuery)}"><button class="btn" data-act="usearch">Cari</button><button class="btn sec" data-act="unmask">${unmask ? 'Sembunyikan email' : 'Tampilkan email'}</button></div>
       <div class="tablewrap" style="margin-top:12px"><table><tr><th>Akun</th><th>Paket</th><th>Sumber</th><th></th></tr>${rows || '<tr><td colspan="4" class="hint">Tidak ada hasil.</td></tr>'}</table></div>
@@ -790,6 +790,34 @@
   }
   async function tierSave(email) {
     try { await rpc('admin_set_tier', { p_email: email, p_type: $('#tiersel').value }); closeModal(); toast('Paket diubah.'); route(); } catch (e) { fail(e); }
+  }
+
+  // Mode Bisnis: Max, a Pro that keeps it until a date, or closed (from business_max_only_from)
+  function bizState(a) {
+    const until = a.business_access_until || (a.business_legacy ? a.business_legacy_until : null);
+    const limit = a.business_max_only_from ? new Date(a.business_max_only_from) : null;
+    const after = limit && new Date() >= limit;
+    if (a.tier === 'max') return { chip: chip('gr', 'Max'), text: 'Terbuka (Max).' };
+    if (!after) return { chip: chip('gr', 'Terbuka'), text: 'Aturan baru belum berlaku' + (limit ? ' (mulai ' + when(limit) + ')' : '') + '. ' + (a.business_access ? 'Paket ini membuka Mode Bisnis sekarang.' : 'Paket ini tidak membuka Mode Bisnis.') };
+    if (a.business_access && until) return { chip: chip('am', 'Pro lama sampai ' + when(until)), text: 'Pro lama: terbuka sampai ' + when(until) + (a.business_manual ? ' (pengecualian manual)' : '') + '.' };
+    return { chip: chip('rd', 'Tertutup'), text: 'Tertutup: hanya lihat.' };
+  }
+  async function bizModal(email) {
+    try {
+      const a = await rpc('admin_business_access', { p_email: email });
+      const st = bizState(a);
+      const cur = a.business_legacy_until ? new Date(a.business_legacy_until).toISOString().slice(0, 10) : '';
+      openModal(`<h3 style="margin:0 0 6px">Mode Bisnis</h3><p class="hint">${esc(email)}</p>
+        <p>${st.chip} ${esc(st.text)}</p>
+        <div class="field"><label>Pengecualian manual: terbuka sampai (tanggal, 23:59 WIB)</label><input id="bizuntil" type="date" value="${esc(cur)}"></div>
+        <p class="hint">Untuk Pro yang belum sempat update sebelum batas. Kosongkan lalu simpan untuk menghapus pengecualian. Tercatat di log admin.</p>
+        <div class="actions"><button class="btn sec" data-act="close">Batal</button><button class="btn" data-act="biz-save" data-email="${esc(email)}">Simpan</button></div>`);
+    } catch (e) { fail(e); }
+  }
+  async function bizSave(email) {
+    const v = $('#bizuntil').value;
+    const until = v ? new Date(v + 'T23:59:00+07:00').toISOString() : null;
+    try { await rpc('admin_set_business_exception', { p_email: email, p_until: until }); closeModal(); toast('Pengecualian disimpan.'); route(); } catch (e) { fail(e); }
   }
 
   // ------------------------------------------------------------------ Pemakaian AI (per email: AI and Scan, hits and cost)
@@ -1047,6 +1075,7 @@
       usearch: () => { userQuery = $('#uq').value.trim(); route(); },
       unmask: () => { unmask = !unmask; route(); },
       tier: () => tierModal(el.dataset.email, el.dataset.type), 'tier-save': () => tierSave(el.dataset.email),
+      biz: () => bizModal(el.dataset.email), 'biz-save': () => bizSave(el.dataset.email),
       'cost-days': () => { cost.days = +el.dataset.v; route(); },
       'use-days': () => { usage.days = +el.dataset.v; usage.open = {}; route(); }, 'use-metric': () => { usage.metric = el.dataset.v; route(); }, 'use-sys': () => { usage.hideSys = !usage.hideSys; route(); }, 'use-open': () => { usage.open[el.dataset.k] = !usage.open[el.dataset.k]; route(); }, 'cost-own': () => { cost.hideOwn = !cost.hideOwn; route(); },
       'quota-one': quotaOne, 'quota-all': quotaAllModal, 'quota-all-do': quotaAllDo,
